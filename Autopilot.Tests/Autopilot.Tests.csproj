@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\Paths.user" Condition="Exists('..\Paths.user')" />
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+
+    <!-- Derived paths -->
+    <RrManagedDir>$(RrInstallDir)\Railroader_Data\Managed</RrManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Autopilot\Autopilot.csproj" />
+  </ItemGroup>
+
+  <!-- Game assemblies — Private=true so they're copied to test output for NUnit to load -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(RrManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Definition">
+      <HintPath>$(RrManagedDir)\Definition.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Core">
+      <HintPath>$(RrManagedDir)\Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="KeyValue.Runtime">
+      <HintPath>$(RrManagedDir)\KeyValue.Runtime.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(RrManagedDir)\UnityEngine.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(RrManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

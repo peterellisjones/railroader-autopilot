@@ -1,0 +1,220 @@
+using System.Collections.Generic;
+using System.Linq;
+using Model;
+using Model.AI;
+using Track;
+using Autopilot.Model;
+using Autopilot.Services;
+
+namespace Autopilot.Planning
+{
+    public class PickupPlanner
+    {
+        private readonly TrainService _trainService;
+
+        public PickupPlanner(TrainService trainService)
+        {
+            _trainService = trainService;
+        }
+
+        private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot Pickup: {msg}");
+
+        /// <summary>
+        /// Given a chain of cars ordered from approach end to buffer end,
+        /// return consecutive target cars from the approach end.
+        /// If the approach-end car is NOT a target, returns empty (blocked).
+        /// </summary>
+        public static List<ICar> FilterAccessibleTargets(
+            List<ICar> chainFromApproach, HashSet<string> targetCarIds)
+        {
+            var targets = new List<ICar>();
+            if (chainFromApproach.Count == 0)
+                return targets;
+
+            if (!targetCarIds.Contains(chainFromApproach[0].id))
+                return targets;
+
+            foreach (var car in chainFromApproach)
+            {
+                if (!targetCarIds.Contains(car.id))
+                    break;
+                targets.Add(car);
+            }
+
+            return targets;
+        }
+
+        /// <summary>
+        /// Walk a car's coupled chain. Returns all cars ordered from
+        /// the end with a free LogicalEnd.A to the end with a free LogicalEnd.B.
+        /// </summary>
+        public static List<ICar> GetCoupledChain(ICar startCar)
+        {
+            var current = startCar;
+            while (current.CoupledTo(Car.LogicalEnd.A) != null)
+                current = current.CoupledTo(Car.LogicalEnd.A)!;
+
+            var chain = new List<ICar>();
+            var visited = new HashSet<string>();
+            while (current != null && !visited.Contains(current.id))
+            {
+                visited.Add(current.id);
+                chain.Add(current);
+                current = current.CoupledTo(Car.LogicalEnd.B);
+            }
+
+            return chain;
+        }
+
+        /// <summary>
+        /// Scan uncoupled cars reachable from the loco. Return distinct
+        /// destination names (sorted) for cars with waybills.
+        /// </summary>
+        public List<string> GetReachableDestinations(BaseLocomotive loco)
+        {
+            var nearbyCars = _trainService.GetNearbyCars(loco);
+            var destinations = new HashSet<string>();
+
+            foreach (var car in nearbyCars)
+            {
+                var waybill = _trainService.GetWaybill(car);
+                if (waybill == null) continue;
+
+                var destName = waybill.Value.Destination.DisplayName;
+                if (string.IsNullOrEmpty(destName)) continue;
+
+                destinations.Add(destName);
+            }
+
+            var result = destinations.ToList();
+            result.Sort();
+            Log($"Found {result.Count} reachable destination(s)");
+            return result;
+        }
+
+        /// <summary>
+        /// Find the nearest accessible car (or group) bound for the given
+        /// destination. Returns null if no more targets are reachable.
+        /// </summary>
+        public PickupTarget? FindNextPickup(BaseLocomotive loco, string destinationName)
+        {
+            var nearbyCars = _trainService.GetNearbyCars(loco);
+            var graph = Graph.Shared;
+
+            // Find all uncoupled cars with matching waybill destination
+            var matchingCarIds = new HashSet<string>();
+            var matchingCars = new Dictionary<string, Car>();
+            foreach (var car in nearbyCars)
+            {
+                var waybill = _trainService.GetWaybill(car);
+                if (waybill == null) continue;
+                if (waybill.Value.Destination.DisplayName != destinationName) continue;
+                matchingCarIds.Add(car.id);
+                matchingCars[car.id] = car;
+            }
+
+            if (matchingCarIds.Count == 0)
+            {
+                Log($"No cars found for destination '{destinationName}'");
+                return null;
+            }
+
+            Log($"Found {matchingCarIds.Count} car(s) for '{destinationName}'");
+
+            var candidates = new List<(PickupTarget target, float distance)>();
+            var processedChains = new HashSet<string>();
+
+            foreach (var carId in matchingCarIds)
+            {
+                var car = matchingCars[carId];
+                var wrapped = (ICar)new CarAdapter(car);
+                var chain = GetCoupledChain(wrapped);
+
+                var chainKey = chain[0].id;
+                if (processedChains.Contains(chainKey))
+                    continue;
+                processedChains.Add(chainKey);
+
+                // Determine approach end: which end of the chain is closer to the loco?
+                var firstCar = chain[0];
+                var lastCar = chain[chain.Count - 1];
+
+                float distToFirst = _trainService.GraphDistanceToLoco(loco, firstCar.EndA)?.Distance ?? float.MaxValue;
+                float distToLast = _trainService.GraphDistanceToLoco(loco, lastCar.EndB)?.Distance ?? float.MaxValue;
+
+                var orderedChain = distToFirst <= distToLast
+                    ? chain
+                    : Enumerable.Reverse(chain).ToList();
+
+                var targets = FilterAccessibleTargets(orderedChain, matchingCarIds);
+                if (targets.Count == 0)
+                    continue;
+
+                var coupleTarget = (orderedChain[0] as CarAdapter)?.Car;
+                if (coupleTarget == null)
+                    continue;
+
+                // Couple location: 0.5m past the couple target on the accessible side.
+                var target = orderedChain[0];
+                var coupled = _trainService.GetCoupled(loco);
+                float trainLen = _trainService.GetTrainLength(loco);
+
+                var endsToTry = new[] { Car.LogicalEnd.A, Car.LogicalEnd.B };
+                // For coupled chains, only try the free end
+                if (orderedChain.Count > 1)
+                {
+                    var nextInChain = orderedChain[1];
+                    var freeEnd = target.CoupledTo(Car.LogicalEnd.A)?.id == nextInChain.id
+                        ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+                    endsToTry = new[] { freeEnd };
+                }
+
+                DirectedPosition coupleLocation = default;
+                float distance = float.MaxValue;
+                bool reachable = false;
+
+                foreach (var logicalEnd in endsToTry)
+                {
+                    var carEnd = target.LogicalToEnd(logicalEnd);
+                    Location testLoc;
+                    var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
+                    var endLoc = endPos.ToLocation();
+                    if (carEnd == Car.End.F)
+                        testLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
+                    else
+                        testLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
+
+                    var routeResult = RouteChecker.RouteDistanceWithCars(loco.LocationF, testLoc, coupled);
+                    float routeDist = routeResult?.Distance ?? float.MaxValue;
+                    if (routeDist < distance)
+                    {
+                        coupleLocation = DirectedPosition.FromLocation(testLoc);
+                        distance = routeDist;
+                        reachable = true;
+                    }
+                }
+
+                if (!reachable)
+                    continue;
+
+                var targetCars = targets.Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
+                candidates.Add((new PickupTarget(
+                    coupleTarget, coupleLocation, targetCars!, destinationName), distance));
+            }
+
+            if (candidates.Count == 0)
+            {
+                Log($"No accessible targets for '{destinationName}'");
+                return null;
+            }
+
+            candidates.Sort((a, b) => a.distance.CompareTo(b.distance));
+
+            var best = candidates[0];
+            Log($"Next pickup: {best.target.CoupleTarget.DisplayName} at distance {best.distance:F0}m " +
+                $"({best.target.TargetCars.Count} target car(s))");
+            return best.target;
+        }
+
+    }
+}

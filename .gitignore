@@ -1,0 +1,31 @@
+# Build outputs
+bin/
+obj/
+*.dll
+*.pdb
+*.user
+*.exe.stackdump
+*.bat
+
+# IDE
+.vs/
+.idea/
+*.suo
+*.csproj.user
+
+# Mod manager
+Paths.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Superpowers brainstorm sessions
+.superpowers/
+
+# Claude Code
+.claude/
+
+docs/
+TODO.md
+CLAUDE.md

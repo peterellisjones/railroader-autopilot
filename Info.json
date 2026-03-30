@@ -1,0 +1,9 @@
+{
+    "Id": "Autopilot",
+    "DisplayName": "Autopilot",
+    "Author": "peterellisjones",
+    "Version": "0.1.0",
+    "ManagerVersion": "0.31.0",
+    "AssemblyName": "Autopilot.dll",
+    "EntryMethod": "Autopilot.Loader.Load"
+}
