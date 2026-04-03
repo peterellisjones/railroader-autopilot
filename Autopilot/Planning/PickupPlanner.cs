@@ -203,27 +203,22 @@ namespace Autopilot.Planning
                 foreach (var logicalEnd in endsToTry)
                 {
                     var coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
-                    if (coupleLoc == null)
-                    {
-                        Log($"Couple location null for {target.DisplayName} end {logicalEnd} (buffer stop)");
-                        continue;
-                    }
                     var testLoc = coupleLoc.ToLocation();
 
-                    // Route with actual train length — a zero-length check
-                    // might find a path the real train can't fit through.
-                    var ignored = new System.Collections.Generic.HashSet<Car>(coupled);
-                    var impasse = new System.Collections.Generic.HashSet<Car>();
-                    var routeSteps = new System.Collections.Generic.List<Track.Search.RouteSearch.Step>();
-                    bool routeFound = Track.Search.RouteSearch.FindRoute(
-                        graph, loco.LocationF, testLoc,
-                        RouteChecker.DefaultHeuristic, routeSteps,
-                        out Track.Search.RouteSearch.Metrics routeMetrics,
-                        checkForCars: true, trainLength: trainLen,
-                        trainMomentum: 0f, maxIterations: 5000,
-                        checkForCarsIgnored: ignored,
-                        checkForCarsImpasse: impasse);
-                    float routeDist = routeFound ? routeMetrics.Distance : float.MaxValue;
+                    var routeResult = _trainService.GraphDistanceToLoco(loco, coupleLoc);
+                    float routeDist = routeResult?.Distance ?? float.MaxValue;
+                    if (routeResult?.BlockedByCars == true)
+                        routeDist = float.MaxValue;
+
+                    // Penalize waypoints that crossed onto a different segment —
+                    // they may land on a dead-end siding the AE can't reach.
+                    bool crossedSegment = testLoc.segment != null && target.EndA.Segment != null
+                        && testLoc.segment.id != target.EndA.Segment.id
+                        && testLoc.segment.id != target.EndB.Segment.id;
+                    if (crossedSegment)
+                        routeDist += 1000f;
+
+                    Log($"Trying {target.DisplayName} end {logicalEnd}: waypoint on {testLoc.segment?.id}|{testLoc.distance:F1}, dist={routeDist:F0}{(crossedSegment ? " (penalized)" : "")}");
                     if (routeDist < distance)
                     {
                         coupleLocation = DirectedPosition.FromLocation(testLoc);
