@@ -58,11 +58,6 @@ namespace Autopilot.Execution
                     bool wpSatisfied = trainService.IsWaypointSatisfied(loco);
                     bool wpMode = trainService.IsWaypointMode(loco);
 
-                    if (_waitTimer < 2f || (int)(_waitTimer * 2) % 10 == 0) // log first 2s, then every 5s
-                        Loader.Mod.Logger.Log($"Autopilot Pickup tick: target={_target.CoupleTarget.DisplayName}, " +
-                            $"status={status}, mode={orders.Mode}, hasWP={orders.Waypoint.HasValue}, " +
-                            $"stopped={stopped}, wpSatisfied={wpSatisfied}, timer={_waitTimer:F1}s");
-
                     // Check for AE planner errors
                     if (status.Contains("blocked") || status.Contains("Blocked")
                         || status.Contains("End of Track") || status.Contains("too long"))
