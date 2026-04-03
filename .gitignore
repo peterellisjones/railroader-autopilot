@@ -6,6 +6,7 @@ obj/
 *.user
 *.exe.stackdump
 *.bat
+*.zip
 
 # IDE
 .vs/
