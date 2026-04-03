@@ -110,13 +110,21 @@ namespace Autopilot.Planning
             var freeEnd = coupleTarget!.CoupledTo(Car.LogicalEnd.A) != null
                 ? Car.LogicalEnd.B : Car.LogicalEnd.A;
             var coupleLocation = GetCoupleLocationForEnd(coupleTarget!, freeEnd, graph);
+            if (coupleLocation == null)
+            {
+                // Free end faces buffer stop — try the other end
+                var otherEnd = freeEnd == Car.LogicalEnd.A ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+                coupleLocation = GetCoupleLocationForEnd(coupleTarget!, otherEnd, graph);
+            }
+            if (coupleLocation == null)
+                return null; // both ends face buffer stops
 
             // Only include cars being detached (tail up to split point)
             var disconnectedCars = group.Cars.Take(splitIdx + 1).Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
 
             return new RunaroundAction(
                 (splitCar as CarAdapter)?.Car!, splitEnd,
-                (coupleTarget as CarAdapter)?.Car!, coupleLocation,
+                (coupleTarget as CarAdapter)?.Car!, coupleLocation.Value,
                 disconnectedCars!);
         }
     }

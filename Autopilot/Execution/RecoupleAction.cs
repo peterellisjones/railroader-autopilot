@@ -13,6 +13,7 @@ namespace Autopilot.Execution
 
         private readonly SplitInfo _split;
         private Car _coupleTarget;
+        private string _initError;
         private Phase _phase;
         private float _waitTimer;
 
@@ -41,27 +42,41 @@ namespace Autopilot.Execution
             var firstLoc = GetCoupleLocationForEnd(new CarAdapter(firstDropped), firstFreeEnd, graph);
             var lastLoc = GetCoupleLocationForEnd(new CarAdapter(lastDropped), lastFreeEnd, graph);
 
-            var resultFirst = Planning.RouteChecker.RouteDistanceWithCars(loco.LocationF, firstLoc.ToLocation(),
-                trainService.GetCoupled(loco));
-            var resultLast = Planning.RouteChecker.RouteDistanceWithCars(loco.LocationF, lastLoc.ToLocation(),
-                trainService.GetCoupled(loco));
+            // Skip ends that face buffer stops
+            float distFirst = float.MaxValue;
+            float distLast = float.MaxValue;
+            if (firstLoc.HasValue)
+            {
+                var result = Planning.RouteChecker.RouteDistanceWithCars(loco.LocationF, firstLoc.Value.ToLocation(),
+                    trainService.GetCoupled(loco));
+                distFirst = result?.Distance ?? float.MaxValue;
+            }
+            if (lastLoc.HasValue)
+            {
+                var result = Planning.RouteChecker.RouteDistanceWithCars(loco.LocationF, lastLoc.Value.ToLocation(),
+                    trainService.GetCoupled(loco));
+                distLast = result?.Distance ?? float.MaxValue;
+            }
 
-            float distFirst = resultFirst?.Distance ?? float.MaxValue;
-            float distLast = resultLast?.Distance ?? float.MaxValue;
-
-            if (distLast < distFirst && resultLast != null && !resultLast.Value.BlockedByCars)
+            if (lastLoc.HasValue && distLast < distFirst)
             {
                 _coupleTarget = lastDropped;
                 Loader.Mod.Logger.Log($"Autopilot Recouple: coupling to far end {lastDropped.DisplayName} " +
                     $"(dist={distLast:F0}m vs {distFirst:F0}m)");
-                trainService.SetWaypointWithCouple(loco, lastLoc, lastDropped.id);
+                trainService.SetWaypointWithCouple(loco, lastLoc.Value, lastDropped.id);
             }
-            else
+            else if (firstLoc.HasValue)
             {
                 _coupleTarget = firstDropped;
                 Loader.Mod.Logger.Log($"Autopilot Recouple: coupling to near end {firstDropped.DisplayName} " +
                     $"(dist={distFirst:F0}m vs {distLast:F0}m)");
-                trainService.SetWaypointWithCouple(loco, firstLoc, firstDropped.id);
+                trainService.SetWaypointWithCouple(loco, firstLoc.Value, firstDropped.id);
+            }
+            else
+            {
+                _initError = "Cannot reach dropped cars — both ends face buffer stops.";
+                StatusMessage = _initError;
+                return;
             }
 
             _phase = Phase.MovingToDropPoint;
@@ -71,6 +86,9 @@ namespace Autopilot.Execution
 
         public ActionOutcome Tick(BaseLocomotive loco, TrainService trainService)
         {
+            if (_initError != null)
+                return new ActionFailed(_initError);
+
             _waitTimer += AutopilotController.TickInterval;
 
             switch (_phase)

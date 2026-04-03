@@ -14,7 +14,10 @@ namespace Autopilot.Services
         /// Do NOT use ClosestLogicalEndTo (crow-flies) to pick the end — use coupling
         /// relationships instead.
         /// </summary>
-        public static DirectedPosition GetCoupleLocationForEnd(ICar target, Car.LogicalEnd logicalEnd, Graph graph)
+        /// <summary>
+        /// Returns null if the end faces a buffer stop (end of track).
+        /// </summary>
+        public static DirectedPosition? GetCoupleLocationForEnd(ICar target, Car.LogicalEnd logicalEnd, Graph graph)
         {
             var carEnd = target.LogicalToEnd(logicalEnd);
             var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
@@ -33,9 +36,8 @@ namespace Autopilot.Services
             }
             catch
             {
-                // End of track — offset would go past the buffer stop.
-                // Use the car end position directly; the AE couples on contact.
-                return endPos;
+                // End of track — this end faces a buffer stop, can't couple here.
+                return null;
             }
         }
     }

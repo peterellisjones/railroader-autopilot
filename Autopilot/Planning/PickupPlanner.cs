@@ -178,14 +178,10 @@ namespace Autopilot.Planning
 
                 foreach (var logicalEnd in endsToTry)
                 {
-                    var carEnd = target.LogicalToEnd(logicalEnd);
-                    Location testLoc;
-                    var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
-                    var endLoc = endPos.ToLocation();
-                    if (carEnd == Car.End.F)
-                        testLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
-                    else
-                        testLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
+                    var coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
+                    if (coupleLoc == null)
+                        continue; // end faces buffer stop
+                    var testLoc = coupleLoc.Value.ToLocation();
 
                     // Route with actual train length — a zero-length check
                     // might find a path the real train can't fit through.
