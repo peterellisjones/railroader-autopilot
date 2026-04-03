@@ -44,7 +44,7 @@ namespace Autopilot.Planning
                 }
 
                 var destination = waybill.Value.Destination;
-                List<(DirectedPosition loc, Car coupleTo, float availableSpace)> destCandidates;
+                List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)> destCandidates;
                 try
                 {
                     destCandidates = _destinationSelector.GetDestinationCandidates(destination, loco);
@@ -64,40 +64,36 @@ namespace Autopilot.Planning
                 // Pick the first candidate that passes route feasibility
                 // AND has space for at least one car.
                 //
-                // Candidates are sorted by priority then distance (nearest
-                // first). The approach direction is determined by how the
-                // train enters the destination — which depends on the route
-                // the AE takes. Only check approach for the first valid
-                // candidate (nearest). If it fails, farther candidates in
-                // the same destination won't help — the train approaches
-                // from the same direction regardless of waypoint position.
+                // For multi-segment spans, the far endpoint may show a
+                // different reversal count than the near endpoint. But the
+                // train enters the span from one side — if the approach
+                // fails for the nearest candidate on a span, skip other
+                // candidates on the SAME span. Different spans (independent
+                // sidings) are checked independently.
                 DirectedPosition destLocation = default;
                 Car? coupleTarget = null;
                 float availableSpace = 0f;
                 bool foundDest = false;
-                bool approachChecked = false;
+                var failedSpans = new HashSet<int>();
                 foreach (var candidate in destCandidates)
                 {
                     if (candidate.loc.Segment == null) continue;
                     if (candidate.availableSpace < car.CarLength)
                         continue; // not enough space on this span
+                    if (failedSpans.Contains(candidate.spanIndex))
+                        continue; // approach already failed for this span
 
-                    if (!approachChecked)
-                    {
-                        // First valid candidate — check approach direction once
-                        approachChecked = true;
-                        if (!checker.CanDeliver(loco, group, candidate.loc))
-                            break; // approach wrong → no candidate will work
-                    }
-
-                    // Approach passed (or already checked) — check routability
-                    if (checker.CanRouteTo(loco, candidate.loc))
+                    if (checker.CanDeliver(loco, group, candidate.loc))
                     {
                         destLocation = candidate.loc;
                         coupleTarget = candidate.coupleTo;
                         availableSpace = candidate.availableSpace;
                         foundDest = true;
                         break;
+                    }
+                    else
+                    {
+                        failedSpans.Add(candidate.spanIndex);
                     }
                 }
 
