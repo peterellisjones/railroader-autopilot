@@ -312,6 +312,18 @@ namespace Autopilot.Planning
                             continue;
                         }
 
+                        // Check reversal parity of the route to the waypoint.
+                        // If the route has an odd number of exit-to-exit switch
+                        // transitions, the train's orientation flips when it arrives.
+                        // This would cancel out the runaround, making it pointless.
+                        int routeReversals = CountRouteReversals(routeSteps);
+                        if (routeReversals % 2 != 0)
+                        {
+                            _logger.Log("LoopValidator", $"GetRepositionLocation: route to {candidate.SwitchId} " +
+                                $"has {routeReversals} reversal(s) — orientation flips, runaround won't help, skipping");
+                            continue;
+                        }
+
                         // Check if route enters through a loop switch (Strategy 1)
                         // or mid-branch via an intermediate junction (Strategy 2/3)
                         bool entersViaLoopSwitch = false;
@@ -467,6 +479,36 @@ namespace Autopilot.Planning
 
             _logger.Log("LoopValidator", $"GetRepositionLocation: loop {loop.SwitchAId}↔{loop.SwitchBId} — couldn't create waypoint at either switch");
             return null;
+        }
+
+        /// <summary>
+        /// Count exit-to-exit switch transitions (reversals) in route steps.
+        /// Each exit-to-exit means the train changes direction at that switch.
+        /// </summary>
+        private static int CountRouteReversals(List<Track.Search.RouteSearch.Step> steps)
+        {
+            int reversals = 0;
+            var graph = Graph.Shared;
+            for (int i = 0; i < steps.Count - 1; i++)
+            {
+                var node = steps[i].Node;
+                if (node == null || !graph.IsSwitch(node))
+                    continue;
+
+                var segBefore = steps[i].Location.segment;
+                var segAfter = steps[i + 1].Location.segment;
+                if (segBefore == null || segAfter == null)
+                    continue;
+
+                graph.DecodeSwitchAt(node, out var enter, out var exitN, out var exitR);
+                bool beforeIsEnter = (segBefore == enter);
+                bool afterIsEnter = (segAfter == enter);
+
+                // exit→exit = reversal (both before and after are non-enter legs)
+                if (!beforeIsEnter && !afterIsEnter)
+                    reversals++;
+            }
+            return reversals;
         }
     }
 }
