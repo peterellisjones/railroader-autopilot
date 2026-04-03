@@ -147,7 +147,17 @@ namespace Autopilot.Execution
 
             if (coupled)
             {
-                Loader.Mod.Logger.Log("Autopilot Runaround: coupling detected — waiting for stop");
+                Loader.Mod.Logger.Log($"Autopilot Runaround: coupling detected — releasing handbrakes and connecting air");
+
+                // Release handbrakes and connect air immediately on coupling,
+                // not after stabilizing. If we wait, the braked cars prevent
+                // the AE from properly stopping, and the bled air means
+                // the train has no working brakes.
+                foreach (var car in _runaround.DisconnectedCars)
+                    trainService.SetHandbrake(car, false);
+                trainService.ConnectAirOnCoupled(loco);
+                trainService.UpdateCarsForAE(loco);
+
                 _statusMessage = "Runaround: coupled, waiting for stop...";
                 _phase = Phase.Stabilizing;
                 return new InProgress();
@@ -189,11 +199,7 @@ namespace Autopilot.Execution
             if (!trainService.IsStoppedForDuration(loco, 2f))
                 return new InProgress();
 
-            Loader.Mod.Logger.Log("Autopilot Runaround: stopped — connecting air and releasing handbrakes");
-            foreach (var car in _runaround.DisconnectedCars)
-                trainService.SetHandbrake(car, false);
-            trainService.ConnectAirOnCoupled(loco);
-            trainService.UpdateCarsForAE(loco);
+            Loader.Mod.Logger.Log("Autopilot Runaround: stopped — re-planning");
 
             _statusMessage = "Runaround complete — re-planning...";
             return new ActionReplan();
