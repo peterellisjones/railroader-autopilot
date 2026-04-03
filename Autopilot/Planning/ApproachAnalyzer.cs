@@ -44,72 +44,114 @@ namespace Autopilot.Planning
             };
 
             var tailOutward = group.TailOutwardEnd!.Value;
+            var tailInward = group.TailInwardEnd!.Value;
             var destLoc = destLocation.ToLocation();
 
-            // Route from the LOCO to the destination — this matches the route
-            // the AE will actually take. Previously routed from the tail, which
-            // could find a different route with different reversals.
-            try
+            // Route from tail to destination. RouteSearch exits the starting
+            // segment in one direction only (the facing direction of the Location).
+            // tailOutward and tailOutward.Flipped face OPPOSITE directions on
+            // the same segment, so we try both and pick the shorter route.
+            int reversals = 0;
+            bool tailFacesDest = true; // default if no route or single segment
+
+            if (tailOutward.Segment != null)
             {
-                // Try both loco directions (LocationF and LocationR)
-                var stepsF = new List<RouteSearch.Step>();
-                bool foundF = RouteSearch.FindRoute(graph, loco.LocationF, destLoc, heuristic,
-                    stepsF, out RouteSearch.Metrics metricsF,
-                    checkForCars: false, trainLength: 0f,
-                    maxIterations: 5000, enableLogging: false);
-
-                var stepsR = new List<RouteSearch.Step>();
-                bool foundR = RouteSearch.FindRoute(graph, loco.LocationR, destLoc, heuristic,
-                    stepsR, out RouteSearch.Metrics metricsR,
-                    checkForCars: false, trainLength: 0f,
-                    maxIterations: 5000, enableLogging: false);
-
-                // The AE picks the shorter route
-                bool useF = foundF && (!foundR || metricsF.Distance <= metricsR.Distance);
-                var bestSteps = useF ? stepsF : stepsR;
-                bool found = useF ? foundF : foundR;
-                bool locoGoesForward = useF; // LocationF = forward end of loco
-
-                if (!found || bestSteps.Count < 2)
+                try
                 {
-                    _logger.LogDebug("CheckApproach", $"no route to dest={destLocation.Segment?.id}");
-                    return true; // assume reachable if no route
+                    var tailOutwardLoc = tailOutward.ToLocation();
+
+                    // Try both directions from the tail's position
+                    var outwardSteps = new List<RouteSearch.Step>();
+                    bool outwardFound = RouteSearch.FindRoute(graph, tailOutwardLoc, destLoc, heuristic,
+                        outwardSteps, out RouteSearch.Metrics outwardMetrics,
+                        checkForCars: false, trainLength: 0f,
+                        maxIterations: 5000, enableLogging: false);
+
+                    var flippedLoc = tailOutward.Flipped.ToLocation();
+                    var flippedSteps = new List<RouteSearch.Step>();
+                    bool flippedFound = RouteSearch.FindRoute(graph, flippedLoc, destLoc, heuristic,
+                        flippedSteps, out RouteSearch.Metrics flippedMetrics,
+                        checkForCars: false, trainLength: 0f,
+                        maxIterations: 5000, enableLogging: false);
+
+                    // Pick the shorter route — it represents the actual approach
+                    bool useOutward = outwardFound && (!flippedFound || outwardMetrics.Distance <= flippedMetrics.Distance);
+                    var tailRouteSteps = useOutward ? outwardSteps : flippedSteps;
+                    bool found = useOutward ? outwardFound : flippedFound;
+
+                    if (found && tailRouteSteps.Count >= 2)
+                    {
+                        var route = ReversalCounter.DeduplicateSegments(tailRouteSteps);
+
+                        _logger.LogApproachDetails("CheckApproach", group, loco, tailOutward, route);
+
+                        // #2: Which end of the tail car is closer to the first switch
+                        // on the route? If the free (outward) end → train goes forward
+                        // → need even reversals. If the coupled (inward) end → train
+                        // goes backward → need odd reversals.
+                        TrackNode firstRouteSwitch = null;
+                        for (int j = 0; j < route.Count - 1; j++)
+                        {
+                            var switchNode = Services.TrackWalker.FindSharedNode(route[j], route[j + 1]);
+                            if (switchNode != null && graph.IsSwitch(switchNode))
+                            {
+                                firstRouteSwitch = switchNode;
+                                break;
+                            }
+                        }
+
+                        // Check both methods for tailFacesDest
+                        bool routeGoesOutward = Services.TrackWalker.RouteGoesOutward(
+                            tailOutward, tailInward, route);
+
+                        if (firstRouteSwitch != null)
+                        {
+                            var tailOutwardLoc2 = tailOutward.ToLocation();
+                            var inwardLoc = tailInward.ToLocation();
+                            var switchSeg = route[0];
+                            var switchEnd = switchSeg.EndForNode(firstRouteSwitch);
+                            var switchLoc = new Location(switchSeg, 0f, switchEnd);
+
+                            graph.TryFindDistance(tailOutwardLoc2, switchLoc, out float distOutward, out _);
+                            graph.TryFindDistance(inwardLoc, switchLoc, out float distInward, out _);
+
+                            bool distanceCheck = distOutward < distInward;
+
+                            // Use RouteGoesOutward as the primary check.
+                            // It directly checks which end of the tail's segment
+                            // the route exits from — no ambiguity with distances.
+                            tailFacesDest = routeGoesOutward;
+
+                            _logger.LogDebug("CheckApproach", $"firstSwitch={firstRouteSwitch.id}, " +
+                                $"RouteGoesOutward={routeGoesOutward}, distCheck={distanceCheck}, " +
+                                $"distOutward={distOutward:F0}, distInward={distInward:F0}, " +
+                                $"tailFacesDest={tailFacesDest}");
+                        }
+                        else
+                        {
+                            tailFacesDest = routeGoesOutward;
+                            _logger.LogDebug("CheckApproach", $"no switch, RouteGoesOutward={routeGoesOutward}, " +
+                                $"tailFacesDest={tailFacesDest}");
+                        }
+
+                        reversals = ReversalCounter.FromSegments(route, graph);
+                    }
                 }
-
-                var route = ReversalCounter.DeduplicateSegments(bestSteps);
-                _logger.LogApproachDetails("CheckApproach", group, loco, tailOutward, route);
-
-                int reversals = ReversalCounter.FromSegments(route, graph);
-
-                // Determine which side of the loco the tail is on.
-                // The tail can be on the forward side (flipped group / pushing)
-                // or the rear side (normal / pulling).
-                var tailLoc = tailOutward.ToLocation();
-                graph.TryFindDistance(loco.LocationF, tailLoc, out float tailDistF, out _);
-                graph.TryFindDistance(loco.LocationR, tailLoc, out float tailDistR, out _);
-                bool tailOnForwardSide = tailDistF < tailDistR;
-
-                // The AE moves the loco. locoGoesForward + even reversals means
-                // the forward end of the loco leads on arrival. Whether the TAIL
-                // leads depends on which side of the loco the tail is on.
-                //
-                // If tail is on forward side: loco forward leads → tail leads
-                // If tail is on rear side: loco forward leads → tail trails
-                bool oddReversals = (reversals % 2 == 1);
-                bool forwardLeadsOnArrival = locoGoesForward ? !oddReversals : oddReversals;
-                bool tailLeads = tailOnForwardSide ? forwardLeadsOnArrival : !forwardLeadsOnArrival;
-
-                _logger.LogDebug("CheckApproach", $"locoGoesForward={locoGoesForward}, " +
-                    $"tailOnForwardSide={tailOnForwardSide}, reversals={reversals}, " +
-                    $"tailLeads={tailLeads} (dest={destLocation.Segment?.id})");
-
-                return tailLeads;
+                catch (Exception ex)
+                {
+                    _logger.Log("CheckApproach", $"route search failed: {ex.GetType().Name}: {ex.Message}");
+                    return false;
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.Log("CheckApproach", $"route search failed: {ex.GetType().Name}: {ex.Message}");
-                return false;
-            }
+
+            // Combine: tailFacesDest XOR oddReversals
+            bool oddReversals = (reversals % 2 == 1);
+            bool tailLeads = tailFacesDest != oddReversals;
+
+            _logger.LogDebug("CheckApproach", $"tailFacesDest={tailFacesDest}, " +
+                $"reversals={reversals}, tailLeads={tailLeads} (dest={destLocation.Segment?.id})");
+
+            return tailLeads;
         }
 
         /// <summary>
