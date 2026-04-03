@@ -17,28 +17,19 @@ namespace Autopilot.Services
         /// <summary>
         /// Returns null if the end faces a buffer stop (end of track).
         /// </summary>
-        public static DirectedPosition? GetCoupleLocationForEnd(ICar target, Car.LogicalEnd logicalEnd, Graph graph)
+        public static DirectedPosition GetCoupleLocationForEnd(ICar target, Car.LogicalEnd logicalEnd, Graph graph)
         {
             var carEnd = target.LogicalToEnd(logicalEnd);
             var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
             // Move CouplingOffsetDistance past the car end.
             // LocationF faces outward from the car body, so positive distance moves away.
             // LocationR faces inward, so we need negative distance + Flip to move away.
-            var endLoc = endPos.ToLocation();
-            try
-            {
-                Location offsetLoc;
-                if (carEnd == Car.End.F)
-                    offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false);
-                else
-                    offsetLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false).Flipped();
-                return DirectedPosition.FromLocation(offsetLoc);
-            }
-            catch
-            {
-                // End of track — this end faces a buffer stop, can't couple here.
-                return null;
-            }
+            // Use the car's end position directly. The AE couples on
+            // contact — no need for an offset past the car body.
+            // The offset caused "End of Track" errors when the car was
+            // near a buffer stop (track extends slightly past the car
+            // but the AE can't route there with the full train).
+            return endPos;
         }
     }
 }

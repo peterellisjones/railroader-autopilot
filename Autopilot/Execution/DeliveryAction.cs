@@ -45,23 +45,10 @@ namespace Autopilot.Execution
                     ? Car.LogicalEnd.B : Car.LogicalEnd.A;
                 var coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
                     new CarAdapter(target), nearEnd, graph);
-                if (coupleLoc == null)
-                {
-                    // Free end faces buffer stop — try the other end
-                    var otherEnd = nearEnd == Car.LogicalEnd.A ? Car.LogicalEnd.B : Car.LogicalEnd.A;
-                    coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
-                        new CarAdapter(target), otherEnd, graph);
-                }
-                if (coupleLoc == null)
-                {
-                    _initError = $"Cannot reach {target.DisplayName} — both ends face buffer stops.";
-                    _statusMessage = _initError;
-                    return;
-                }
-                var coupleLocStr = Graph.Shared.LocationToString(coupleLoc.Value.ToLocation());
+                var coupleLocStr = Graph.Shared.LocationToString(coupleLoc.ToLocation());
                 Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling to {step.CoupleTarget.DisplayName} " +
                     $"at end {nearEnd}, waypoint={coupleLocStr}");
-                trainService.SetWaypointWithCouple(loco, coupleLoc.Value, step.CoupleTarget.id);
+                trainService.SetWaypointWithCouple(loco, coupleLoc, step.CoupleTarget.id);
             }
             else
             {

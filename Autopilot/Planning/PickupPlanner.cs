@@ -102,6 +102,12 @@ namespace Autopilot.Planning
             _trainService.ClearPlanCaches();
             var nearbyCars = _trainService.GetNearbyCars(loco);
             Log($"GetNearbyCars returned {nearbyCars.Count} cars");
+
+            foreach (var car in nearbyCars)
+            {
+                var pos = car.transform.position;
+                Log($"Car: {car.DisplayName} pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) seg={car.LocationA.segment?.id} active={car.gameObject.activeInHierarchy}");
+            }
             var graph = Graph.Shared;
 
             // Find all uncoupled cars with matching waybill destination
@@ -152,12 +158,32 @@ namespace Autopilot.Planning
                 float distToFirst = _trainService.GraphDistanceToLoco(loco, firstCar.EndA)?.Distance ?? float.MaxValue;
                 float distToLast = _trainService.GraphDistanceToLoco(loco, lastCar.EndB)?.Distance ?? float.MaxValue;
 
-                var orderedChain = distToFirst <= distToLast
-                    ? chain
-                    : Enumerable.Reverse(chain).ToList();
+                // Try both orientations — the closer end might face a buffer stop
+                var chainOrientations = new List<List<ICar>>();
+                if (distToFirst <= distToLast)
+                {
+                    chainOrientations.Add(chain);
+                    chainOrientations.Add(Enumerable.Reverse(chain).ToList());
+                }
+                else
+                {
+                    chainOrientations.Add(Enumerable.Reverse(chain).ToList());
+                    chainOrientations.Add(chain);
+                }
 
-                var targets = FilterAccessibleTargets(orderedChain, matchingCarIds);
-                if (targets.Count == 0)
+                List<ICar> orderedChain = null;
+                List<ICar> targets = null;
+                foreach (var orientation in chainOrientations)
+                {
+                    var t = FilterAccessibleTargets(orientation, matchingCarIds);
+                    if (t.Count > 0)
+                    {
+                        orderedChain = orientation;
+                        targets = t;
+                        break;
+                    }
+                }
+                if (orderedChain == null || targets == null || targets.Count == 0)
                     continue;
 
                 var coupleTarget = (orderedChain[0] as CarAdapter)?.Car;
@@ -188,36 +214,10 @@ namespace Autopilot.Planning
                     var coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
                     if (coupleLoc == null)
                     {
-                        Log($"Couple location null for {target.DisplayName} end {logicalEnd} (buffer stop?)");
-                        // Free end faces buffer stop. For coupled chains, try
-                        // the reversed chain (approach from the other end).
-                        if (orderedChain.Count > 1)
-                        {
-                            orderedChain = Enumerable.Reverse(orderedChain).ToList();
-                            targets = FilterAccessibleTargets(orderedChain, matchingCarIds);
-                            if (targets.Count == 0)
-                            {
-                                Log($"Reversed chain has no accessible targets");
-                                break;
-                            }
-                            coupleTarget = (orderedChain[0] as CarAdapter)?.Car;
-                            target = orderedChain[0];
-                            var otherFreeEnd = target.CoupledTo(Car.LogicalEnd.A)?.id == orderedChain[1].id
-                                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
-                            coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, otherFreeEnd, graph);
-                            if (coupleLoc == null)
-                            {
-                                Log($"Reversed chain couple location also null for {target.DisplayName}");
-                                break;
-                            }
-                            Log($"Reversed chain: new target {target.DisplayName} end {otherFreeEnd}");
-                        }
-                        else
-                        {
-                            continue; // standalone car, try other end
-                        }
+                        Log($"Couple location null for {target.DisplayName} end {logicalEnd} (buffer stop)");
+                        continue;
                     }
-                    var testLoc = coupleLoc.Value.ToLocation();
+                    var testLoc = coupleLoc.ToLocation();
 
                     // Route with actual train length — a zero-length check
                     // might find a path the real train can't fit through.

@@ -328,16 +328,7 @@ namespace Autopilot.Planning
                 ? Car.LogicalEnd.B : Car.LogicalEnd.A;
             var couplePos = CoupleLocationCalculator.GetCoupleLocationForEnd(
                 new CarAdapter(coupleTarget), freeEnd, graph);
-            if (couplePos == null)
-            {
-                // Free end faces buffer stop — try the other end
-                var otherEnd = freeEnd == Car.LogicalEnd.A ? Car.LogicalEnd.B : Car.LogicalEnd.A;
-                couplePos = CoupleLocationCalculator.GetCoupleLocationForEnd(
-                    new CarAdapter(coupleTarget), otherEnd, graph);
-            }
-            if (couplePos == null)
-                return null; // can't couple
-            var coupleLoc = couplePos.Value.ToLocation();
+            var coupleLoc = couplePos.ToLocation();
 
             var coupleLocation = DirectedPosition.FromLocation(coupleLoc);
 
