@@ -208,8 +208,23 @@ namespace Autopilot.Execution
             if (Math.Max(dA, dB) <= destDist)
                 return dest;
 
-            Loader.Mod.Logger.Log($"Autopilot DeliveryAction: waypoint pushed {offset:F1}m deeper: " +
-                $"{destLoc.segment?.id}|{destLoc.distance:F1} → {adjusted.segment?.id}|{adjusted.distance:F1}");
+            // Don't push past the end of the destination segment. The span
+            // defines the usable siding — pushing beyond it can place the
+            // waypoint in an invalid position (past a buffer stop).
+            if (adjusted.segment != destLoc.segment)
+            {
+                // Went past the segment entirely — clamp to near the end
+                float segLen = destLoc.segment.GetLength();
+                float clampedDist = Math.Max(segLen - 1f, destLoc.distance);
+                adjusted = new Location(destLoc.segment, clampedDist, destLoc.end);
+                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: waypoint clamped to segment end: " +
+                    $"{destLoc.segment.id}|{clampedDist:F1}");
+            }
+            else
+            {
+                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: waypoint pushed {offset:F1}m deeper: " +
+                    $"{destLoc.segment?.id}|{destLoc.distance:F1} → {adjusted.segment?.id}|{adjusted.distance:F1}");
+            }
 
             return DirectedPosition.FromLocation(adjusted);
         }
