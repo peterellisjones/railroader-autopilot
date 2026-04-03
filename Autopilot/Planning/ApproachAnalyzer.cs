@@ -81,19 +81,27 @@ namespace Autopilot.Planning
 
                 int reversals = ReversalCounter.FromSegments(route, graph);
 
-                // The AE moves the loco. With 0 reversals and locoGoesForward,
-                // the loco leads (tail trails). Each reversal flips which end leads.
-                // tailLeads = true when the tail is at the front on arrival.
+                // Determine which side of the loco the tail is on.
+                // The tail can be on the forward side (flipped group / pushing)
+                // or the rear side (normal / pulling).
+                var tailLoc = tailOutward.ToLocation();
+                graph.TryFindDistance(loco.LocationF, tailLoc, out float tailDistF, out _);
+                graph.TryFindDistance(loco.LocationR, tailLoc, out float tailDistR, out _);
+                bool tailOnForwardSide = tailDistF < tailDistR;
+
+                // The AE moves the loco. locoGoesForward + even reversals means
+                // the forward end of the loco leads on arrival. Whether the TAIL
+                // leads depends on which side of the loco the tail is on.
                 //
-                // locoGoesForward + even reversals → loco leads → tailLeads=false
-                // locoGoesForward + odd reversals  → tail leads → tailLeads=true
-                // !locoGoesForward + even reversals → tail leads → tailLeads=true
-                // !locoGoesForward + odd reversals  → loco leads → tailLeads=false
+                // If tail is on forward side: loco forward leads → tail leads
+                // If tail is on rear side: loco forward leads → tail trails
                 bool oddReversals = (reversals % 2 == 1);
-                bool tailLeads = locoGoesForward ? oddReversals : !oddReversals;
+                bool forwardLeadsOnArrival = locoGoesForward ? !oddReversals : oddReversals;
+                bool tailLeads = tailOnForwardSide ? forwardLeadsOnArrival : !forwardLeadsOnArrival;
 
                 _logger.LogDebug("CheckApproach", $"locoGoesForward={locoGoesForward}, " +
-                    $"reversals={reversals}, tailLeads={tailLeads} (dest={destLocation.Segment?.id})");
+                    $"tailOnForwardSide={tailOnForwardSide}, reversals={reversals}, " +
+                    $"tailLeads={tailLeads} (dest={destLocation.Segment?.id})");
 
                 return tailLeads;
             }
