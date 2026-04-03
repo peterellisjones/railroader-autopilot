@@ -104,6 +104,10 @@ When a runaround is needed, the mod searches for passing sidings (loops) by walk
 
 When the whole train is too long for a route, the mod groups cars by destination and finds a split point where the shorter consist can deliver the tail group. It checks that the delivery route doesn't pass through switches blocked by the dropped cars.
 
+## Known Limitations
+
+- **Not tested with modded tracks.** This mod has only been tested with the base game's track layout. Custom track mods may produce unexpected behavior, especially with loop detection and approach direction analysis. If you encounter issues on modded track, please report them with logs.
+
 ## Requirements
 
 - [Railroader](https://store.steampowered.com/app/1689160/Railroader/)
