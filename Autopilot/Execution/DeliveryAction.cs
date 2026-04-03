@@ -47,9 +47,9 @@ namespace Autopilot.Execution
             }
             else
             {
-                // Empty span — push waypoint deeper by trainLength so the
-                // entire train fits past the span lower bound.
-                var waypoint = AdjustWaypointForConsistLength(loco, step.DestinationLocation, step.Cars, trainService);
+                // Empty span — push waypoint to the far end of the span so the
+                // train goes as deep as possible into the siding.
+                var waypoint = GetDeepestSpanLocation(loco, step);
                 trainService.SetWaypoint(loco, waypoint);
             }
         }
@@ -177,70 +177,37 @@ namespace Autopilot.Execution
         }
 
         /// <summary>
-        /// Push the waypoint deeper so the entire train fits past the
-        /// destination (span lower bound). The AE positions the front of
-        /// the train at the waypoint; the loco trails behind by trainLength.
-        /// Offset by trainLength so the trailing end clears the span start.
+        /// Find the deepest point within the destination span — the span
+        /// endpoint farthest from the loco. This ensures the train pushes
+        /// all the way into the siding. Stays within span bounds so the
+        /// waypoint is always on valid siding track.
         /// </summary>
-        private static DirectedPosition AdjustWaypointForConsistLength(
-            BaseLocomotive loco, DirectedPosition dest, List<Car> cars, TrainService trainService)
+        private static DirectedPosition GetDeepestSpanLocation(BaseLocomotive loco, DeliveryStep step)
         {
-            if (cars.Count == 0) return dest;
-
             var graph = Graph.Shared;
-            if (dest.Segment == null) return dest;
+            DirectedPosition best = step.DestinationLocation;
+            float bestDist = 0f;
 
-            float offset = trainService.GetTrainLength(loco);
-            var destLoc = dest.ToLocation();
-
-            // Move dest DEEPER into the siding by the offset.
-            // Try both directions since we don't know which way dest faces.
-            // Pick the one farther from the loco (deeper).
-            var optA = graph.LocationByMoving(destLoc, offset, false, true);
-            var optB = graph.LocationByMoving(destLoc.Flipped(), offset, false, true).Flipped();
-
-            float dA = MinDistToLoco(graph, loco, optA);
-            float dB = MinDistToLoco(graph, loco, optB);
-            var adjusted = dA >= dB ? optA : optB;
-
-            // Sanity: adjusted must be farther from loco than dest (deeper).
-            float destDist = MinDistToLoco(graph, loco, destLoc);
-            if (Math.Max(dA, dB) <= destDist)
-                return dest;
-
-            // Clamp to the destination segment. LocationByMoving with clamp
-            // keeps the result on the same segment but can place it past the
-            // usable end of a short siding (past a buffer stop). Limit to
-            // 1m from either end of the segment.
-            float segLen = destLoc.segment.GetLength();
-            float minDist = 0f;
-            float maxDist = segLen;
-            if (adjusted.distance < minDist || adjusted.distance > maxDist)
+            foreach (var span in step.Destination.Spans)
             {
-                float clamped = Math.Max(minDist, Math.Min(adjusted.distance, maxDist));
-                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: waypoint clamped: " +
-                    $"{adjusted.segment?.id}|{adjusted.distance:F1} → {adjusted.segment?.id}|{clamped:F1} (seg len={segLen:F1})");
-                adjusted = new Location(adjusted.segment, clamped, adjusted.end);
-            }
-            else
-            {
-                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: waypoint pushed {offset:F1}m deeper: " +
-                    $"{destLoc.segment?.id}|{destLoc.distance:F1} → {adjusted.segment?.id}|{adjusted.distance:F1}");
+                foreach (var ep in new[] { span.lower, span.upper })
+                {
+                    if (!ep.HasValue || ep.Value.segment == null) continue;
+
+                    graph.TryFindDistance(loco.LocationF, ep.Value, out float dF, out _);
+                    graph.TryFindDistance(loco.LocationR, ep.Value, out float dR, out _);
+                    float dist = Math.Max(dF, dR);
+                    if (dist > bestDist)
+                    {
+                        bestDist = dist;
+                        best = DirectedPosition.FromLocation(ep.Value);
+                    }
+                }
             }
 
-            return DirectedPosition.FromLocation(adjusted);
-        }
-
-        private static float SafeDist(Graph graph, Location a, Location b)
-        {
-            return graph.TryFindDistance(a, b, out float d, out _) ? d : float.MaxValue;
-        }
-
-        private static float MinDistToLoco(Graph graph, BaseLocomotive loco, Location loc)
-        {
-            float dF = SafeDist(graph, loco.LocationF, loc);
-            float dR = SafeDist(graph, loco.LocationR, loc);
-            return Math.Min(dF, dR);
+            Loader.Mod.Logger.Log($"Autopilot DeliveryAction: waypoint at span end: " +
+                $"{best.Segment?.id}|{best.ToLocation().distance:F1}");
+            return best;
         }
     }
 }
