@@ -60,6 +60,17 @@ namespace Autopilot.Execution
                     if (trainService.IsStopped(loco))
                     {
                         _stuckTimer += AutopilotController.TickInterval;
+
+                        // If waypoint is satisfied but not coupled, the loco is
+                        // at the waypoint but hasn't made contact. Nudge forward
+                        // in yard mode to couple.
+                        if (_stuckTimer > 3f && trainService.IsWaypointSatisfied(loco))
+                        {
+                            Loader.Mod.Logger.Log("Autopilot Pickup: waypoint satisfied but not coupled — nudging forward");
+                            trainService.MoveDistance(loco, 5f, true);
+                            _stuckTimer = 0f;
+                        }
+
                         if (_stuckTimer > Loader.Settings.stuckTimeoutSeconds)
                             return new ActionFailed($"Train stuck for {Loader.Settings.stuckTimeoutSeconds:0}s reaching {_target.CoupleTarget.DisplayName}. Is the route blocked?");
                     }
