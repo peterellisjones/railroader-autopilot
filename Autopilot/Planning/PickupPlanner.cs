@@ -99,6 +99,7 @@ namespace Autopilot.Planning
         /// </summary>
         public PickupTarget? FindNextPickup(BaseLocomotive loco, string destinationName)
         {
+            _trainService.ClearPlanCaches();
             var nearbyCars = _trainService.GetNearbyCars(loco);
             var graph = Graph.Shared;
 

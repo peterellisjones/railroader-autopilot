@@ -12,6 +12,12 @@ namespace Autopilot.Planning
     {
         private readonly TrainService _trainService;
         private readonly PlanningLogger _logger;
+        private Dictionary<string, RouteResult?>? _distanceCache;
+
+        public void ClearCache()
+        {
+            _distanceCache = null;
+        }
 
         public static HeuristicCosts DefaultHeuristic => new HeuristicCosts
         {
@@ -148,14 +154,25 @@ namespace Autopilot.Planning
         /// </summary>
         public RouteResult? GraphDistanceToLoco(BaseLocomotive loco, DirectedPosition target)
         {
-            var coupled = _trainService.GetCoupled(loco);
             var targetLoc = target.ToLocation();
+            if (targetLoc.segment == null) return null;
+
+            var cacheKey = $"{targetLoc.segment.id}|{targetLoc.distance:F2}";
+            _distanceCache ??= new Dictionary<string, RouteResult?>();
+            if (_distanceCache.TryGetValue(cacheKey, out var cached))
+                return cached;
+
+            var coupled = _trainService.GetCoupled(loco);
             var resultF = RouteDistanceWithCars(loco.LocationF, targetLoc, coupled);
             var resultR = RouteDistanceWithCars(loco.LocationR, targetLoc, coupled);
 
-            if (resultF == null) return resultR;
-            if (resultR == null) return resultF;
-            return resultF.Value.Distance <= resultR.Value.Distance ? resultF : resultR;
+            RouteResult? result;
+            if (resultF == null) result = resultR;
+            else if (resultR == null) result = resultF;
+            else result = resultF.Value.Distance <= resultR.Value.Distance ? resultF : resultR;
+
+            _distanceCache[cacheKey] = result;
+            return result;
         }
 
         /// <summary>

@@ -26,6 +26,13 @@ namespace Autopilot.Planning
             _runaroundBuilder = new RunaroundBuilder(_deliverabilityAnalyzer);
         }
 
+        private void ClearCaches()
+        {
+            _trainService.ClearPlanCaches();
+            _destinationSelector.ClearCache();
+            _checker.RouteChecker.ClearCache();
+        }
+
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot Planner: {msg}");
 
         public DeliveryPlan BuildPlan(BaseLocomotive loco,
@@ -33,6 +40,7 @@ namespace Autopilot.Planning
             IEnumerable<string>? visitedLoopKeys = null,
             IEnumerable<Car>? skippedCars = null)
         {
+            ClearCaches();
             var layout = ConsistLayout.Create(loco, _trainService);
             var warnings = new List<string>();
 

@@ -15,6 +15,13 @@ namespace Autopilot.Planning
         private readonly TrainService _trainService;
         private readonly RouteChecker _routeChecker;
 
+        private Dictionary<string, List<(DirectedPosition loc, Car coupleTo)>>? _destCache;
+
+        public void ClearCache()
+        {
+            _destCache = null;
+        }
+
         public DestinationSelector(TrainService trainService, RouteChecker routeChecker)
         {
             _trainService = trainService;
@@ -30,6 +37,10 @@ namespace Autopilot.Planning
         /// </summary>
         public List<(DirectedPosition loc, Car coupleTo)> GetDestinationCandidates(OpsCarPosition destination, BaseLocomotive loco)
         {
+            _destCache ??= new Dictionary<string, List<(DirectedPosition loc, Car coupleTo)>>();
+            if (_destCache.TryGetValue(destination.Identifier, out var cached))
+                return cached;
+
             var graph = Graph.Shared;
             var coupled = new HashSet<Car>(_trainService.GetCoupled(loco));
 
@@ -129,7 +140,9 @@ namespace Autopilot.Planning
                     return a.priority.CompareTo(b.priority);
                 return a.dist.CompareTo(b.dist);
             });
-            return candidates.ConvertAll(c => (c.loc, c.coupleTo));
+            var result = candidates.ConvertAll(c => (c.loc, c.coupleTo));
+            _destCache[destination.Identifier] = result;
+            return result;
         }
 
         public DirectedPosition GetDestinationLocation(OpsCarPosition destination, BaseLocomotive loco)

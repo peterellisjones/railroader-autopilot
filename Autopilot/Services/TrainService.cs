@@ -19,9 +19,27 @@ namespace Autopilot.Services
         private const string ParkingSpaceKey = "autopilot.parkingSpace";
         private const string ParkAfterDeliveryKey = "autopilot.parkAfterDelivery";
 
+        // Per-plan-cycle caches — cleared by DeliveryPlanner.BuildPlan()
+        private List<Car>? _cachedCoupled;
+        private string? _cachedCoupledLocoId;
+        private float? _cachedTrainLength;
+        private string? _cachedTrainLengthLocoId;
+
+        public void ClearPlanCaches()
+        {
+            _cachedCoupled = null;
+            _cachedCoupledLocoId = null;
+            _cachedTrainLength = null;
+            _cachedTrainLengthLocoId = null;
+        }
+
         public List<Car> GetCoupled(BaseLocomotive loco)
         {
-            return loco.EnumerateCoupled(Car.LogicalEnd.A).ToList();
+            if (_cachedCoupled != null && _cachedCoupledLocoId == loco.id)
+                return _cachedCoupled;
+            _cachedCoupled = loco.EnumerateCoupled(Car.LogicalEnd.A).ToList();
+            _cachedCoupledLocoId = loco.id;
+            return _cachedCoupled;
         }
 
         public Waybill? GetWaybill(Car car)
@@ -295,12 +313,16 @@ namespace Autopilot.Services
 
         public float GetTrainLength(BaseLocomotive loco)
         {
+            if (_cachedTrainLength.HasValue && _cachedTrainLengthLocoId == loco.id)
+                return _cachedTrainLength.Value;
             var cars = GetCoupled(loco);
             float length = 0f;
             foreach (var car in cars)
                 length += car.carLength;
             if (cars.Count > 1)
                 length += (cars.Count - 1) * AutopilotConstants.ConsistGapPerCar;
+            _cachedTrainLength = length;
+            _cachedTrainLengthLocoId = loco.id;
             return length;
         }
 
