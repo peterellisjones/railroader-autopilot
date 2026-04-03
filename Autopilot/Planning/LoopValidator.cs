@@ -459,7 +459,7 @@ namespace Autopilot.Planning
 
                                 if (!wpRouteFound) continue;
 
-                                int destReversals = CountRouteReversals(wpSteps);
+                                int destReversals = ReversalCounter.FromSteps(wpSteps);
                                 // For a runaround to work, we need the approach to have
                                 // even reversals (preserves tail-leads after runaround).
                                 // Odd reversals would flip the orientation, cancelling
@@ -518,62 +518,5 @@ namespace Autopilot.Planning
             return null;
         }
 
-        /// <summary>
-        /// Count reversals in route steps using the same logic as
-        /// ApproachAnalyzer: deduplicate segments, count multi-visit
-        /// switches and exit→exit transitions.
-        /// </summary>
-        private static int CountRouteReversals(List<Track.Search.RouteSearch.Step> steps)
-        {
-            var graph = Graph.Shared;
-
-            // Deduplicate to segment list (same as ApproachAnalyzer.DeduplicateRouteSegments)
-            var route = new List<TrackSegment>();
-            foreach (var step in steps)
-            {
-                if (step.Location.segment == null) continue;
-                if (route.Count > 0 && route[route.Count - 1] == step.Location.segment)
-                    continue;
-                route.Add(step.Location.segment);
-            }
-
-            int reversals = 0;
-            var switchVisits = new Dictionary<string, int>();
-
-            for (int j = 0; j < route.Count - 1; j++)
-            {
-                var node = Services.TrackWalker.FindSharedNode(route[j], route[j + 1]);
-                if (node == null || !graph.IsSwitch(node))
-                    continue;
-
-                if (!switchVisits.ContainsKey(node.id))
-                    switchVisits[node.id] = 0;
-                switchVisits[node.id]++;
-            }
-
-            // Each switch visited N times has N-1 reversals
-            foreach (var kvp in switchVisits)
-            {
-                if (kvp.Value > 1)
-                    reversals += kvp.Value - 1;
-            }
-
-            // Exit→exit transitions at switches visited exactly once
-            for (int j = 0; j < route.Count - 1; j++)
-            {
-                var node = Services.TrackWalker.FindSharedNode(route[j], route[j + 1]);
-                if (node == null || !graph.IsSwitch(node))
-                    continue;
-
-                graph.DecodeSwitchAt(node, out var enter, out var exitN, out var exitR);
-                bool fromIsExit = (route[j] == exitN || route[j] == exitR);
-                bool toIsExit = (route[j + 1] == exitN || route[j + 1] == exitR);
-
-                if (fromIsExit && toIsExit && switchVisits[node.id] == 1)
-                    reversals++;
-            }
-
-            return reversals;
-        }
     }
 }

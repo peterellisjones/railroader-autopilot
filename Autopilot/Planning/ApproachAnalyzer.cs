@@ -81,7 +81,7 @@ namespace Autopilot.Planning
 
                     if (found && tailRouteSteps.Count >= 2)
                     {
-                        var route = DeduplicateRouteSegments(tailRouteSteps);
+                        var route = ReversalCounter.DeduplicateSegments(tailRouteSteps);
 
                         _logger.LogApproachDetails("CheckApproach", group, loco, tailOutward, route);
 
@@ -134,7 +134,7 @@ namespace Autopilot.Planning
                                 $"tailFacesDest={tailFacesDest}");
                         }
 
-                        reversals = CountReversals(route, graph);
+                        reversals = ReversalCounter.FromSegments(route, graph);
                     }
                 }
                 catch (Exception ex)
@@ -226,91 +226,5 @@ namespace Autopilot.Planning
         }
 
         // --- Private helpers ---
-
-        /// <summary>
-        /// Deduplicate consecutive identical segments from RouteSearch steps.
-        /// Logs a warning for non-consecutive duplicate segments.
-        /// </summary>
-        private List<TrackSegment> DeduplicateRouteSegments(List<RouteSearch.Step> routeSteps)
-        {
-            var route = new List<TrackSegment>();
-            var seenSegIds = new HashSet<string>();
-            foreach (var step in routeSteps)
-            {
-                if (step.Location.segment == null) continue;
-                if (route.Count > 0 && route[route.Count - 1] == step.Location.segment)
-                    continue; // consecutive duplicate
-
-                if (!seenSegIds.Add(step.Location.segment.id))
-                    _logger.LogDebug("CheckApproach", $"WARNING — non-consecutive duplicate segment {step.Location.segment.id}");
-
-                route.Add(step.Location.segment);
-            }
-            return route;
-        }
-
-        /// <summary>
-        /// Count reversals in a deduplicated route segment list.
-        /// A reversal is either: a switch visited more than once (extra visits = extra reversals),
-        /// or an exit→exit transition at a switch visited exactly once (compressed reversal).
-        /// </summary>
-        private int CountReversals(List<TrackSegment> route, Graph graph)
-        {
-            int reversals = 0;
-
-            // Count switch visit frequencies and log leg transitions
-            var switchVisits = new Dictionary<string, int>();
-            for (int j = 0; j < route.Count - 1; j++)
-            {
-                var node = Services.TrackWalker.FindSharedNode(route[j], route[j + 1]);
-                if (node == null || !graph.IsSwitch(node))
-                    continue;
-
-                if (!switchVisits.ContainsKey(node.id))
-                    switchVisits[node.id] = 0;
-                switchVisits[node.id]++;
-
-                graph.DecodeSwitchAt(node, out TrackSegment enter,
-                    out TrackSegment exitNormal, out TrackSegment exitReverse);
-
-                string fromLeg = route[j] == enter ? "enter" : (route[j] == exitNormal ? "exitN" : "exitR");
-                string toLeg = route[j + 1] == enter ? "enter" : (route[j + 1] == exitNormal ? "exitN" : "exitR");
-                _logger.LogDebug("CheckApproach", $"switch {node.id}: {fromLeg}→{toLeg}");
-            }
-
-            // Each switch visited N times has N-1 reversals at that switch
-            foreach (var kvp in switchVisits)
-            {
-                int extraVisits = kvp.Value - 1;
-                if (extraVisits > 0)
-                {
-                    reversals += extraVisits;
-                    _logger.LogDebug("CheckApproach", $"switch {kvp.Key} visited {kvp.Value}x → {extraVisits} reversal(s)");
-                }
-            }
-
-            // Also count exit→exit transitions (compressed reversals)
-            for (int j = 0; j < route.Count - 1; j++)
-            {
-                var node = Services.TrackWalker.FindSharedNode(route[j], route[j + 1]);
-                if (node == null || !graph.IsSwitch(node))
-                    continue;
-
-                graph.DecodeSwitchAt(node, out TrackSegment enter,
-                    out TrackSegment exitNormal, out TrackSegment exitReverse);
-
-                bool fromIsExit = (route[j] == exitNormal || route[j] == exitReverse);
-                bool toIsExit = (route[j + 1] == exitNormal || route[j + 1] == exitReverse);
-
-                // Only count if this switch was visited once (not already counted above)
-                if (fromIsExit && toIsExit && switchVisits[node.id] == 1)
-                {
-                    reversals++;
-                    _logger.LogDebug("CheckApproach", $"exit→exit REVERSAL at {node.id}");
-                }
-            }
-
-            return reversals;
-        }
     }
 }
