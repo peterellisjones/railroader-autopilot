@@ -18,6 +18,11 @@ namespace Autopilot.Services
     {
         private const string ParkingSpaceKey = "autopilot.parkingSpace";
         private const string ParkAfterDeliveryKey = "autopilot.parkAfterDelivery";
+        private const string ActiveKey = "autopilot.active";
+        private const string ModeKey = "autopilot.mode";
+        private const string TargetDestinationKey = "autopilot.targetDestination";
+        private const string PickupCountKey = "autopilot.pickupCount";
+        private const string ContextKey = "autopilot.context";
 
         // Per-plan-cycle caches — cleared by DeliveryPlanner.BuildPlan()
         private List<Car>? _cachedCoupled;
@@ -193,6 +198,65 @@ namespace Autopilot.Services
         public void SetParkAfterDelivery(BaseLocomotive loco, bool enabled)
         {
             loco.KeyValueObject[ParkAfterDeliveryKey] = Value.Bool(enabled);
+        }
+
+        public void SaveAutopilotState(BaseLocomotive loco, AutopilotMode mode,
+            string? targetDestination, int pickupCount, PlanningContext context)
+        {
+            loco.KeyValueObject[ActiveKey] = Value.Bool(true);
+            loco.KeyValueObject[ModeKey] = Value.String(mode.ToString());
+            loco.KeyValueObject[TargetDestinationKey] = targetDestination != null
+                ? Value.String(targetDestination) : Value.Null();
+            loco.KeyValueObject[PickupCountKey] = Value.Int(pickupCount);
+            loco.KeyValueObject[ContextKey] = Value.String(context.Serialize());
+        }
+
+        public void ClearAutopilotState(BaseLocomotive loco)
+        {
+            loco.KeyValueObject[ActiveKey] = Value.Bool(false);
+            loco.KeyValueObject[ModeKey] = Value.Null();
+            loco.KeyValueObject[TargetDestinationKey] = Value.Null();
+            loco.KeyValueObject[PickupCountKey] = Value.Null();
+            loco.KeyValueObject[ContextKey] = Value.Null();
+        }
+
+        public SavedAutopilotState? LoadAutopilotState(BaseLocomotive loco)
+        {
+            var activeVal = loco.KeyValueObject[ActiveKey];
+            if (activeVal.IsNull || !activeVal.BoolValue)
+                return null;
+
+            var modeVal = loco.KeyValueObject[ModeKey];
+            var mode = AutopilotMode.Delivery;
+            if (!modeVal.IsNull && modeVal.StringValue == AutopilotMode.Pickup.ToString())
+                mode = AutopilotMode.Pickup;
+
+            var destVal = loco.KeyValueObject[TargetDestinationKey];
+            string? targetDestination = destVal.IsNull ? null : destVal.StringValue;
+
+            var pickupVal = loco.KeyValueObject[PickupCountKey];
+            int pickupCount = pickupVal.IsNull ? 0 : pickupVal.IntValue;
+
+            var contextVal = loco.KeyValueObject[ContextKey];
+            PlanningContext context;
+            if (contextVal.IsNull || string.IsNullOrEmpty(contextVal.StringValue))
+            {
+                context = PlanningContext.Empty;
+            }
+            else
+            {
+                try
+                {
+                    context = PlanningContext.Deserialize(contextVal.StringValue);
+                }
+                catch
+                {
+                    Loader.Mod.Logger.Log($"Autopilot: Failed to deserialize context for {loco.DisplayName}, using empty context.");
+                    context = PlanningContext.Empty;
+                }
+            }
+
+            return new SavedAutopilotState(mode, targetDestination, pickupCount, context);
         }
 
         public bool IsWaypointMode(BaseLocomotive loco)
