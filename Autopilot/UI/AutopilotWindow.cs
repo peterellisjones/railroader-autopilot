@@ -414,9 +414,17 @@ namespace Autopilot.UI
 
                     if (plan.HasDeliveries)
                     {
+                        const int MaxVisibleSteps = 3;
                         builder.AddSection("Deliveries");
+                        int shown = 0;
                         foreach (var step in plan.Steps)
                         {
+                            // Always show done/in-progress/error steps, plus
+                            // up to MaxVisibleSteps pending steps.
+                            bool isPending = step.Status == StepStatus.Pending;
+                            if (isPending && shown >= MaxVisibleSteps)
+                                continue;
+
                             string icon;
                             switch (step.Status)
                             {
@@ -428,7 +436,12 @@ namespace Autopilot.UI
 
                             var carNames = string.Join(", ", step.Cars.Select(c => c.DisplayName));
                             builder.AddLabel($"{icon}  {carNames}  \u2192  {step.DestinationName}");
+                            if (isPending) shown++;
                         }
+
+                        int remaining = plan.Steps.Count(s => s.Status == StepStatus.Pending) - shown;
+                        if (remaining > 0)
+                            builder.AddLabel($"     +{remaining} more");
                     }
 
                     if (plan.Warnings.Count > 0)
