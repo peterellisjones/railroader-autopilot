@@ -61,18 +61,37 @@ namespace Autopilot.Planning
                     continue;
                 }
 
-                // Pick the first candidate span that passes route feasibility
+                // Pick the first candidate that passes route feasibility
                 // AND has space for at least one car.
+                //
+                // Candidates are sorted by priority then distance (nearest
+                // first). The approach direction is determined by how the
+                // train enters the destination — which depends on the route
+                // the AE takes. Only check approach for the first valid
+                // candidate (nearest). If it fails, farther candidates in
+                // the same destination won't help — the train approaches
+                // from the same direction regardless of waypoint position.
                 DirectedPosition destLocation = default;
                 Car? coupleTarget = null;
                 float availableSpace = 0f;
                 bool foundDest = false;
+                bool approachChecked = false;
                 foreach (var candidate in destCandidates)
                 {
                     if (candidate.loc.Segment == null) continue;
                     if (candidate.availableSpace < car.CarLength)
                         continue; // not enough space on this span
-                    if (checker.CanDeliver(loco, group, candidate.loc))
+
+                    if (!approachChecked)
+                    {
+                        // First valid candidate — check approach direction once
+                        approachChecked = true;
+                        if (!checker.CanDeliver(loco, group, candidate.loc))
+                            break; // approach wrong → no candidate will work
+                    }
+
+                    // Approach passed (or already checked) — check routability
+                    if (checker.CanRouteTo(loco, candidate.loc))
                     {
                         destLocation = candidate.loc;
                         coupleTarget = candidate.coupleTo;
