@@ -100,14 +100,13 @@ namespace Autopilot.Planning
                 if (!foundDest)
                     break; // no span is deliverable or has space — stop
 
-                // Group consecutive cars going to the same physical track,
-                // limited by available space on the destination.
                 // Group consecutive cars going to the same physical track.
-                // Cars only need partial overlap with the span to be delivered,
-                // so don't limit group size by available space.
+                // Each car needs at least 2m of overlap with the span.
+                const float SpacePerCar = 2f;
+                int maxCars = System.Math.Max(1, (int)(availableSpace / SpacePerCar));
                 var firstGameCar = (car as CarAdapter)?.Car;
                 var carGroup = new List<Car> { firstGameCar };
-                while (i + carGroup.Count < group.Cars.Count)
+                while (i + carGroup.Count < group.Cars.Count && carGroup.Count < maxCars)
                 {
                     var nextCar = group.Cars[i + carGroup.Count];
                     if (nextCar.Waybill == null)
