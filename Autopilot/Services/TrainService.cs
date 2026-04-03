@@ -232,8 +232,8 @@ namespace Autopilot.Services
 
             var modeVal = loco.KeyValueObject[ModeKey];
             var mode = AutopilotMode.Delivery;
-            if (!modeVal.IsNull && modeVal.StringValue == AutopilotMode.Pickup.ToString())
-                mode = AutopilotMode.Pickup;
+            if (!modeVal.IsNull)
+                System.Enum.TryParse(modeVal.StringValue, out mode);
 
             var destVal = loco.KeyValueObject[TargetDestinationKey];
             string? targetDestination = destVal.IsNull ? null : destVal.StringValue;
@@ -253,9 +253,9 @@ namespace Autopilot.Services
                 {
                     context = PlanningContext.Deserialize(contextVal.StringValue);
                 }
-                catch
+                catch (System.Exception ex)
                 {
-                    Loader.Mod.Logger.Log($"Autopilot: Failed to deserialize context for {loco.DisplayName}, using empty context.");
+                    Loader.Mod.Logger.Log($"Autopilot: Failed to deserialize context for {loco.DisplayName}: {ex.Message}. Using empty context.");
                     context = PlanningContext.Empty;
                 }
             }

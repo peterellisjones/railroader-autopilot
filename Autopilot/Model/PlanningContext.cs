@@ -67,7 +67,7 @@ namespace Autopilot.Model
                 ?? Enumerable.Empty<string>();
             foreach (var id in skippedIds)
             {
-                if (TrainController.Shared.TryGetCarForId(id, out Car car))
+                if (TrainController.Shared != null && TrainController.Shared.TryGetCarForId(id, out Car car))
                     skippedCars.Add(car);
             }
 

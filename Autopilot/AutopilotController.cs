@@ -150,8 +150,13 @@ namespace Autopilot
 
         private void ResumeFromSave(BaseLocomotive loco, SavedAutopilotState savedState)
         {
-            // Stop any existing autopilot for this loco (shouldn't happen, but be safe)
-            StopAutopilot(loco);
+            // If an SM already exists for this loco, clean up without calling Stop()
+            // (which would clear persisted state via SetPhase(Idle)).
+            if (_stateMachines.Remove(loco) && _coroutines.TryGetValue(loco, out var existing) && existing != null)
+            {
+                StopCoroutine(existing);
+                _coroutines.Remove(loco);
+            }
 
             var sm = new AutopilotStateMachine(_trainService);
             _stateMachines[loco] = sm;
