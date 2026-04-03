@@ -75,7 +75,26 @@ namespace Autopilot.Planning
                 float availableSpace = 0f;
                 bool foundDest = false;
                 var failedSpans = new HashSet<int>();
-                foreach (var candidate in destCandidates)
+                // Prefer candidates on a span the train is already on.
+                var consistSegIds = new HashSet<string>();
+                if (loco.LocationF.segment != null) consistSegIds.Add(loco.LocationF.segment.id);
+                if (loco.LocationR.segment != null) consistSegIds.Add(loco.LocationR.segment.id);
+                foreach (var c in group.Cars)
+                {
+                    if (c.EndA.Segment != null) consistSegIds.Add(c.EndA.Segment.id);
+                    if (c.EndB.Segment != null) consistSegIds.Add(c.EndB.Segment.id);
+                }
+
+                // Try candidates on the train's span first, then the rest.
+                var orderedCandidates = new System.Collections.Generic.List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)>();
+                foreach (var c in destCandidates)
+                    if (c.loc.Segment != null && consistSegIds.Contains(c.loc.Segment.id))
+                        orderedCandidates.Add(c);
+                foreach (var c in destCandidates)
+                    if (c.loc.Segment == null || !consistSegIds.Contains(c.loc.Segment.id))
+                        orderedCandidates.Add(c);
+
+                foreach (var candidate in orderedCandidates)
                 {
                     if (candidate.loc.Segment == null) continue;
                     if (candidate.availableSpace < 2f)
