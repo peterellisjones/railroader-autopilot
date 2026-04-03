@@ -137,7 +137,7 @@ namespace Autopilot.Planning
             bool hasDeliverableCars = layout.SideA.Cars.Concat(layout.SideB.Cars)
                 .Any(c => c.Waybill != null && (skippedCars == null || !skippedCars.Contains((c as CarAdapter)?.Car)));
 
-            if (hasDeliverableCars)
+            if (hasDeliverableCars && !_checker.IsOnClearLoop(loco))
             {
                 Log("No runarounds feasible — checking reposition to loop...");
 
