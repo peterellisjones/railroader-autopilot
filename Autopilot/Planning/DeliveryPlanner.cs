@@ -143,13 +143,27 @@ namespace Autopilot.Planning
                 var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys);
                 if (repositionLoc.HasValue)
                 {
-                    string reason = "Repositioning to loop";
-                    if (scoreA > 0 || scoreB > 0)
+                    // Find a destination name for the reason message.
+                    // Try runaround candidates first, then any waybilled car.
+                    string destName = null;
+                    if (scoreA > 0 && flippedStepsA.Count > 0)
+                        destName = flippedStepsA[0].DestinationName;
+                    else if (scoreB > 0 && flippedStepsB.Count > 0)
+                        destName = flippedStepsB[0].DestinationName;
+                    else
                     {
-                        var bestFlippedSteps = scoreA >= scoreB ? flippedStepsA : flippedStepsB;
-                        if (bestFlippedSteps.Count > 0)
-                            reason = $"Repositioning to loop (need runaround to deliver to {bestFlippedSteps[0].DestinationName})";
+                        foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
+                        {
+                            if (car.Waybill != null && (skippedCars == null || !skippedCars.Contains((car as CarAdapter)?.Car)))
+                            {
+                                destName = car.Waybill.Value.Destination.DisplayName;
+                                break;
+                            }
+                        }
                     }
+                    string reason = destName != null
+                        ? $"Repositioning to loop (need runaround to deliver to {destName})"
+                        : "Repositioning to loop";
 
                     Log(reason);
                     return new DeliveryPlan(new List<DeliveryStep>(), warnings,

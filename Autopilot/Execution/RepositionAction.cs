@@ -14,9 +14,9 @@ namespace Autopilot.Execution
         public string StatusMessage { get; private set; }
 
         public RepositionAction(DirectedPosition waypoint, BaseLocomotive loco,
-            TrainService trainService)
+            TrainService trainService, string? reason = null)
         {
-            StatusMessage = "Repositioning to loop...";
+            StatusMessage = reason ?? "Repositioning to loop...";
             trainService.SetWaypoint(loco, waypoint);
             _phase = Phase.Moving;
         }

@@ -237,7 +237,7 @@ namespace Autopilot.Execution
             if (plan.RepositionLoopKey != null)
                 repositionContext = repositionContext.WithVisitedLoop(plan.RepositionLoopKey);
             var repositionAction = new RepositionAction(
-                plan.RepositionLocation!.Value, _loco, _trainService);
+                plan.RepositionLocation!.Value, _loco, _trainService, plan.Reason);
             SetPhase(new Executing(plan, repositionAction, repositionContext, p.Mode, p.TargetDestination, p.PickupCount, plan.RepositionLocation.Value));
         }
 
