@@ -97,14 +97,24 @@ namespace Autopilot.Planning
             int scoreA = flippedStepsA.Count;
             int scoreB = flippedStepsB.Count;
 
-            // When consolidation is needed, boost the score for the side whose
-            // runaround puts more same-destination cars together.
+            // When consolidation is needed, prefer the side whose flipped tail
+            // is directly deliverable. A deliverable tail means we can deliver
+            // immediately after consolidation without another runaround.
             if (needsConsolidation)
             {
-                // After runaround on sideA: sideA cars join sideB → count matching
-                // sideB destinations that appear in flipped sideA steps
-                scoreA += CountSharedDestCars(flippedStepsA, stepsB);
-                scoreB += CountSharedDestCars(flippedStepsB, stepsA);
+                bool aDeliverable = flippedStepsA.Count > 0;
+                bool bDeliverable = flippedStepsB.Count > 0;
+
+                if (aDeliverable && !bDeliverable)
+                    scoreA += 1000;
+                else if (bDeliverable && !aDeliverable)
+                    scoreB += 1000;
+                else
+                {
+                    // Both or neither deliverable — use shared car count as tiebreaker
+                    scoreA += CountSharedDestCarsFromWaybills(flippedStepsA, layout.SideB, skippedCars);
+                    scoreB += CountSharedDestCarsFromWaybills(flippedStepsB, layout.SideA, skippedCars);
+                }
             }
 
             Log($"Runaround scores: sideA={scoreA}, sideB={scoreB}");
@@ -280,6 +290,29 @@ namespace Autopilot.Planning
                     return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Count cars on the other side whose destination matches a destination
+        /// in the flipped steps. Uses raw waybills from the other side's CarGroup.
+        /// </summary>
+        private static int CountSharedDestCarsFromWaybills(
+            List<DeliveryStep> flippedSteps, CarGroup otherSide, IEnumerable<Car>? skippedCars)
+        {
+            var dests = new HashSet<string>();
+            foreach (var step in flippedSteps)
+                dests.Add(step.DestinationName);
+
+            int count = 0;
+            foreach (var car in otherSide.Cars)
+            {
+                if (car.Waybill == null) continue;
+                var gameCar = (car as CarAdapter)?.Car;
+                if (skippedCars != null && gameCar != null && skippedCars.Contains(gameCar)) continue;
+                if (dests.Contains(car.Waybill.Value.Destination.DisplayName))
+                    count++;
+            }
+            return count;
         }
 
         /// <summary>
