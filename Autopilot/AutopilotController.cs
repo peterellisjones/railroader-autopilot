@@ -61,7 +61,7 @@ namespace Autopilot
             _coroutines[loco] = StartCoroutine(TickLoop(loco, sm));
         }
 
-        public void StartPickup(string destinationName)
+        public void StartPickup(string destinationName, bool deliverAfterPickup = false)
         {
             var loco = _trainService.GetSelectedLocomotive();
             if (loco == null)
@@ -73,6 +73,7 @@ namespace Autopilot
             StopAutopilot(loco);
 
             var sm = new AutopilotStateMachine(_trainService);
+            sm.DeliverAfterPickup = deliverAfterPickup;
             _stateMachines[loco] = sm;
             sm.Start(loco, AutopilotMode.Pickup, destinationName);
             _coroutines[loco] = StartCoroutine(TickLoop(loco, sm));

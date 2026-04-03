@@ -23,6 +23,7 @@ namespace Autopilot.UI
         private AutopilotMode _selectedMode = AutopilotMode.Delivery;
         private int _selectedDestinationIndex = -1;
         private List<string> _destinations = new List<string>();
+        private bool _deliverAfterPickup = false;
 
         // Event-driven rebuild tracking
         private AutopilotStateMachine _subscribedSm;
@@ -287,6 +288,9 @@ namespace Autopilot.UI
                                 (index) => { _selectedDestinationIndex = index; }
                             )
                         );
+                        builder.AddFieldToggle("Deliver after pickup",
+                            () => _deliverAfterPickup,
+                            (val) => _deliverAfterPickup = val);
                     }
                 }
             }
@@ -304,7 +308,7 @@ namespace Autopilot.UI
                         if (canStart)
                         {
                             strip.AddButton("Start Pickup", () =>
-                                { controller.StartPickup(_destinations[_selectedDestinationIndex]); RebuildPanel(); });
+                                { controller.StartPickup(_destinations[_selectedDestinationIndex], _deliverAfterPickup); RebuildPanel(); });
                         }
                     }
                     else

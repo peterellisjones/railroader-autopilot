@@ -44,6 +44,8 @@ namespace Autopilot.Execution
             _ => 0
         };
 
+        public bool DeliverAfterPickup { get; set; }
+
         public event Action? OnStateChanged;
 
         public AutopilotStateMachine(TrainService trainService)
@@ -270,6 +272,12 @@ namespace Autopilot.Execution
 
             if (target == null)
             {
+                if (DeliverAfterPickup)
+                {
+                    Loader.Mod.Logger.Log($"Autopilot: Pickup complete ({p.PickupCount} cars) — starting delivery");
+                    SetPhase(new PlanningPhase(PlanningContext.Empty, AutopilotMode.Delivery, null));
+                    return;
+                }
                 var msg = $"Pickup complete — {p.PickupCount} car(s) collected for {p.TargetDestination}.";
                 SetPhase(new Completed(msg, p.PickupCount));
                 return;
