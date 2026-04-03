@@ -1,9 +1,6 @@
 using Model;
-using Track;
 using Autopilot.Model;
 using Autopilot.Services;
-using static Autopilot.Services.CoupleLocationCalculator;
-
 namespace Autopilot.Execution
 {
     public class RunaroundExecutionAction : IAction
@@ -125,11 +122,12 @@ namespace Autopilot.Execution
         private ActionOutcome TickSettingWaypoint(BaseLocomotive loco, TrainService trainService)
         {
             var target = _runaround.CoupleTarget;
-            var graph = Graph.Shared;
 
-            // Find the far end of the target so the loco routes around to the far side.
-            var locoPos = DirectedPosition.FromLocation(loco.LocationF);
-            var coupleLocation = GetCoupleLocation(target, locoPos, graph);
+            // Use the pre-computed couple location from planning. It was calculated
+            // when the loco was on the correct side of the cars, targeting the far
+            // end of the cut. Recomputing now would use the current loco position
+            // (right next to the uncoupled cars) and pick the wrong end.
+            var coupleLocation = _runaround.CoupleLocation;
 
             Loader.Mod.Logger.Log($"Autopilot Runaround: setting coupling waypoint to {target.DisplayName}");
             _statusMessage = $"Runaround: routing to {target.DisplayName}...";
