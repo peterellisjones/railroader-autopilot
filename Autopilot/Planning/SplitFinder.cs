@@ -96,6 +96,15 @@ namespace Autopilot.Planning
                     continue;
                 }
 
+                // Check approach direction — does the tail actually lead?
+                // The route check above only verifies the route exists and is
+                // safe, not that the train arrives tail-first.
+                if (!_checker.ApproachAnalyzer.CheckApproachDirection(loco, group, destLoc))
+                {
+                    LogDebug($"  Tail group {tailGroup.destName}: approach wrong (tail doesn't lead)");
+                    continue;
+                }
+
                 LogDebug($"  Tail group {tailGroup.destName} is deliverable ({tailGroup.cars.Count} cars)");
                 var split = BuildSplitInfo(loco, keptCars, droppedCars, group, graph);
                 Log($"Split found: keep {keptCars.Count} cars (tail={tailGroup.destName}), drop {droppedCars.Count}");
