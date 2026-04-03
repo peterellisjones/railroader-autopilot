@@ -79,6 +79,7 @@ namespace Autopilot.Planning
             {
                 var waybill = _trainService.GetWaybill(car);
                 if (waybill == null) continue;
+                if (waybill.Value.Completed) continue;
 
                 var destName = waybill.Value.Destination.DisplayName;
                 if (string.IsNullOrEmpty(destName)) continue;
@@ -108,6 +109,7 @@ namespace Autopilot.Planning
             {
                 var waybill = _trainService.GetWaybill(car);
                 if (waybill == null) continue;
+                if (waybill.Value.Completed) continue;
                 if (waybill.Value.Destination.DisplayName != destinationName) continue;
                 matchingCarIds.Add(car.id);
                 matchingCars[car.id] = car;

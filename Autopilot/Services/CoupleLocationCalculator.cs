@@ -40,9 +40,15 @@ namespace Autopilot.Services
         {
             var carEnd = target.LogicalToEnd(logicalEnd);
             var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
-            // Move CouplingOffsetDistance past the car end
+            // Move CouplingOffsetDistance past the car end.
+            // LocationF faces outward from the car body, so positive distance moves away.
+            // LocationR faces inward, so we need negative distance + Flip to move away.
             var endLoc = endPos.ToLocation();
-            var offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
+            Location offsetLoc;
+            if (carEnd == Car.End.F)
+                offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
+            else
+                offsetLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
             return DirectedPosition.FromLocation(offsetLoc);
         }
     }

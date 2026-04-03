@@ -163,8 +163,8 @@ namespace Autopilot.Execution
             if (trainService.IsStopped(loco))
             {
                 _stuckTimer += AutopilotController.TickInterval;
-                if (_stuckTimer > AutopilotConstants.StuckTimeoutSeconds)
-                    return new ActionFailed($"Train stuck for {AutopilotConstants.StuckTimeoutSeconds:0}s during runaround. Is there a runaround track available?");
+                if (_stuckTimer > Loader.Settings.stuckTimeoutSeconds)
+                    return new ActionFailed($"Train stuck for {Loader.Settings.stuckTimeoutSeconds:0}s during runaround. Is there a runaround track available?");
             }
             else
             {

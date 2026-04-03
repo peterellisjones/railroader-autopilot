@@ -8,6 +8,9 @@ namespace Autopilot
         [Header("Keybindings")]
         [Draw("Toggle Autopilot window")] public KeyBinding toggleWindowKey = new KeyBinding() { modifiers = 2, keyCode = KeyCode.N };
 
+        [Header("Timeouts")]
+        [Draw("Stuck timeout (seconds)")] public float stuckTimeoutSeconds = 60f;
+
         [Header("Debug")]
         [Draw("Verbose logging")] public bool verboseLogging = false;
 

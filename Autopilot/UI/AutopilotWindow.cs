@@ -28,6 +28,8 @@ namespace Autopilot.UI
         private AutopilotStateMachine _subscribedSm;
         private string _lastLocoId;
         private bool _lastHadWaypoint;
+        private string _lastStatusMessage;
+        private string _lastErrorMessage;
         private Coroutine _ticker;
         private TrainService _trainService;
         private TrainService TrainSvc => _trainService ??= new TrainService();
@@ -116,10 +118,17 @@ namespace Autopilot.UI
                     continue;
                 }
 
-                // During execution, rebuild for live status updates
+                // During execution, rebuild only when status text actually changed
                 var sm = AutopilotController.Instance?.GetStateMachineForSelected();
                 if (sm != null && sm.Phase is Executing)
-                    RebuildPanel();
+                {
+                    if (sm.StatusMessage != _lastStatusMessage || sm.ErrorMessage != _lastErrorMessage)
+                    {
+                        _lastStatusMessage = sm.StatusMessage;
+                        _lastErrorMessage = sm.ErrorMessage;
+                        RebuildPanel();
+                    }
+                }
             }
 
             _ticker = null;
@@ -219,7 +228,7 @@ namespace Autopilot.UI
                 return;
             }
 
-            builder.Spacing = 8f;
+            builder.Spacing = 1f;
 
             var loco = TrainController.Shared?.SelectedLocomotive;
             _lastLocoId = loco?.id;
@@ -315,40 +324,41 @@ namespace Autopilot.UI
 
                 // Jump to the AE's actual live waypoint, not the mod's internal target
                 var wpString = TrainSvc.GetCurrentWaypointLocationString(loco);
-                if (wpString != null)
+                bool hasActiveWaypoint = wpString != null;
+                strip.AddButton("Jump to WP", () =>
                 {
-                    strip.AddButton("Jump to WP", () =>
+                    var currentWp = TrainSvc.GetCurrentWaypointLocationString(loco);
+                    if (currentWp != null)
                     {
-                        var currentWp = TrainSvc.GetCurrentWaypointLocationString(loco);
-                        if (currentWp != null)
-                        {
-                            var loc = Track.Graph.Shared.ResolveLocationString(currentWp);
-                            CameraSelector.shared.JumpToPoint(
-                                loc.GetPosition(),
-                                loc.GetRotation(),
-                                CameraSelector.CameraIdentifier.Strategy);
-                        }
-                    });
-                }
+                        var loc = Track.Graph.Shared.ResolveLocationString(currentWp);
+                        CameraSelector.shared.JumpToPoint(
+                            loc.GetPosition(),
+                            loc.GetRotation(),
+                            CameraSelector.CameraIdentifier.Strategy);
+                    }
+                }).Disable(!hasActiveWaypoint);
+            });
 
-                // Parking buttons in the same strip
-                var activeWp = TrainSvc.GetCurrentWaypointLocationString(loco);
-                bool hasActiveWaypoint = activeWp != null;
-                bool hasParkingSpace = TrainSvc.GetParkingSpace(loco) != null;
+            // Parking buttons on their own row
+            var parkWpString = TrainSvc.GetCurrentWaypointLocationString(loco);
+            bool parkHasWaypoint = parkWpString != null;
+            bool hasParkingSpace = TrainSvc.GetParkingSpace(loco) != null;
 
-                bool canSetPark = hasActiveWaypoint && !autopilotRunning;
+            builder.ButtonStrip(strip =>
+            {
+                bool canSetPark = parkHasWaypoint && !autopilotRunning;
                 strip.AddButton("Set Park", () =>
                 {
-                    var wpString = TrainSvc.GetCurrentWaypointLocationString(loco);
-                    if (wpString != null)
+                    var wp = TrainSvc.GetCurrentWaypointLocationString(loco);
+                    if (wp != null)
                     {
-                        TrainSvc.SaveParkingSpace(loco, wpString);
+                        TrainSvc.SaveParkingSpace(loco, wp);
                         RebuildPanel();
                     }
                 }).Disable(!canSetPark)
                   .Tooltip("Parking Space",
                       autopilotRunning ? "Stop autopilot first"
-                      : !hasActiveWaypoint ? "Set a waypoint first, then save it as a parking space"
+                      : !parkHasWaypoint ? "Set a waypoint first, then save it as a parking space"
                       : "Save the current waypoint as this loco's parking space");
 
                 bool canPark = hasParkingSpace && !autopilotRunning;

@@ -60,8 +60,8 @@ namespace Autopilot.Execution
                     if (trainService.IsStopped(loco))
                     {
                         _stuckTimer += AutopilotController.TickInterval;
-                        if (_stuckTimer > AutopilotConstants.StuckTimeoutSeconds)
-                            return new ActionFailed($"Train stuck for {AutopilotConstants.StuckTimeoutSeconds:0}s reaching {_target.CoupleTarget.DisplayName}. Is the route blocked?");
+                        if (_stuckTimer > Loader.Settings.stuckTimeoutSeconds)
+                            return new ActionFailed($"Train stuck for {Loader.Settings.stuckTimeoutSeconds:0}s reaching {_target.CoupleTarget.DisplayName}. Is the route blocked?");
                     }
                     else
                     {
