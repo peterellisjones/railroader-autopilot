@@ -146,10 +146,20 @@ namespace Autopilot.Planning
             }
 
             // Check if there ARE deliverable cars (just not from this position).
-            // If so, reposition to a loop where we can runaround or deliver.
-            // Skip if already fully on a loop — would just bounce between loops.
-            bool hasDeliverableCars = layout.SideA.Cars.Concat(layout.SideB.Cars)
-                .Any(c => c.Waybill != null && (skippedCars == null || !skippedCars.Contains((c as CarAdapter)?.Car)));
+            // Only count cars whose destinations have available space — cars
+            // for full sidings won't benefit from repositioning or runarounds.
+            bool hasDeliverableCars = false;
+            foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
+            {
+                if (car.Waybill == null) continue;
+                if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
+                var space = _destinationSelector.GetAvailableSpace(car.Waybill.Value.Destination, loco);
+                if (space >= 2f)
+                {
+                    hasDeliverableCars = true;
+                    break;
+                }
+            }
 
             if (hasDeliverableCars && !loopStatus.CanRunaround)
             {
