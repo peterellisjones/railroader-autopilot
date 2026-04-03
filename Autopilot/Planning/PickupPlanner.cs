@@ -187,8 +187,20 @@ namespace Autopilot.Planning
                     else
                         testLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
 
-                    var routeResult = RouteChecker.RouteDistanceWithCars(loco.LocationF, testLoc, coupled);
-                    float routeDist = routeResult?.Distance ?? float.MaxValue;
+                    // Route with actual train length — a zero-length check
+                    // might find a path the real train can't fit through.
+                    var ignored = new System.Collections.Generic.HashSet<Car>(coupled);
+                    var impasse = new System.Collections.Generic.HashSet<Car>();
+                    var routeSteps = new System.Collections.Generic.List<Track.Search.RouteSearch.Step>();
+                    bool routeFound = Track.Search.RouteSearch.FindRoute(
+                        graph, loco.LocationF, testLoc,
+                        RouteChecker.DefaultHeuristic, routeSteps,
+                        out Track.Search.RouteSearch.Metrics routeMetrics,
+                        checkForCars: true, trainLength: trainLen,
+                        trainMomentum: 0f, maxIterations: 5000,
+                        checkForCarsIgnored: ignored,
+                        checkForCarsImpasse: impasse);
+                    float routeDist = routeFound ? routeMetrics.Distance : float.MaxValue;
                     if (routeDist < distance)
                     {
                         coupleLocation = DirectedPosition.FromLocation(testLoc);
