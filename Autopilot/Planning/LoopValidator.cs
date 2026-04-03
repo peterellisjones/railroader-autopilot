@@ -159,6 +159,15 @@ namespace Autopilot.Planning
             var locoSegId = loco.LocationF.segment?.id;
             if (locoSegId == null) return false;
 
+            // Collect all segments the consist occupies
+            var consistSegIds = new HashSet<string>();
+            consistSegIds.Add(locoSegId);
+            foreach (var car in _trainService.GetCoupled(loco))
+            {
+                if (car.LocationA.segment != null) consistSegIds.Add(car.LocationA.segment.id);
+                if (car.LocationB.segment != null) consistSegIds.Add(car.LocationB.segment.id);
+            }
+
             // Try multiple loops — FindFittingLoop returns the "nearest" by BFS
             // metric, which might not be the one the train is actually on.
             var triedLoopKeys = new HashSet<string>();
@@ -168,29 +177,49 @@ namespace Autopilot.Planning
                 var loop = FindFittingLoop(loco, adapter, null, triedLoopKeys);
                 if (loop == null) break;
 
-                // Check if the loco's segment is part of this loop's branches
-                // or the stem (enter leg) of either switch.
+                // Collect all segments that are part of this loop (branches + stems)
+                var loopSegIds = new HashSet<string>();
                 foreach (var branch in loop.Branches)
-                {
-                    if (branch.SegmentIds.Contains(locoSegId))
-                    {
-                        _logger.Log("LoopValidator", $"Runaround feasibility: on loop {loop.SwitchAId}↔{loop.SwitchBId} (seg={locoSegId})");
-                        return true;
-                    }
-                }
+                    foreach (var segId in branch.SegmentIds)
+                        loopSegIds.Add(segId);
 
                 var (enterA, _, _) = adapter.GetSwitchLegs(loop.SwitchAId);
                 var (enterB, _, _) = adapter.GetSwitchLegs(loop.SwitchBId);
-                if (locoSegId == enterA || locoSegId == enterB)
+                if (enterA != null) loopSegIds.Add(enterA);
+                if (enterB != null) loopSegIds.Add(enterB);
+
+                // Check if the loco is on this loop
+                if (!loopSegIds.Contains(locoSegId))
                 {
-                    _logger.Log("LoopValidator", $"Runaround feasibility: on stem of loop {loop.SwitchAId}↔{loop.SwitchBId} (seg={locoSegId})");
+                    triedLoopKeys.Add(loop.LoopKey);
+                    continue;
+                }
+
+                // Check if the ENTIRE consist is on this loop.
+                // If any car extends onto a non-loop segment (e.g. a siding),
+                // the train can't do a runaround — it needs to reposition first.
+                bool allOnLoop = true;
+                foreach (var segId in consistSegIds)
+                {
+                    if (!loopSegIds.Contains(segId))
+                    {
+                        _logger.Log("LoopValidator", $"Runaround feasibility: loco on loop {loop.SwitchAId}↔{loop.SwitchBId} " +
+                            $"but consist extends onto {segId} (not on loop)");
+                        allOnLoop = false;
+                        break;
+                    }
+                }
+
+                if (allOnLoop)
+                {
+                    _logger.Log("LoopValidator", $"Runaround feasibility: fully on loop {loop.SwitchAId}↔{loop.SwitchBId} (seg={locoSegId})");
                     return true;
                 }
 
                 triedLoopKeys.Add(loop.LoopKey);
             }
 
-            _logger.Log("LoopValidator", $"Runaround feasibility: not on any clear loop (seg={locoSegId})");
+            _logger.Log("LoopValidator", $"Runaround feasibility: not fully on any clear loop (seg={locoSegId})");
             return false;
         }
 
