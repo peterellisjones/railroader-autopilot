@@ -180,7 +180,26 @@ namespace Autopilot.Planning
                 {
                     var coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
                     if (coupleLoc == null)
-                        continue; // end faces buffer stop
+                    {
+                        // Free end faces buffer stop. For coupled chains, try
+                        // the reversed chain (approach from the other end).
+                        if (orderedChain.Count > 1)
+                        {
+                            orderedChain = Enumerable.Reverse(orderedChain).ToList();
+                            targets = FilterAccessibleTargets(orderedChain, matchingCarIds);
+                            if (targets.Count == 0) break;
+                            coupleTarget = (orderedChain[0] as CarAdapter)?.Car;
+                            target = orderedChain[0];
+                            var otherFreeEnd = target.CoupledTo(Car.LogicalEnd.A)?.id == orderedChain[1].id
+                                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+                            coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, otherFreeEnd, graph);
+                            if (coupleLoc == null) break;
+                        }
+                        else
+                        {
+                            continue; // standalone car, try other end
+                        }
+                    }
                     var testLoc = coupleLoc.Value.ToLocation();
 
                     // Route with actual train length — a zero-length check
