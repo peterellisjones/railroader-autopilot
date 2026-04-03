@@ -414,34 +414,71 @@ namespace Autopilot.UI
 
                     if (plan.HasDeliveries)
                     {
-                        const int MaxVisibleSteps = 3;
+                        const int MaxVisibleLines = 3;
                         builder.AddSection("Deliveries");
-                        int shown = 0;
-                        foreach (var step in plan.Steps)
+                        int shownPending = 0;
+                        int pendingLines = 0;
+                        int i = 0;
+                        while (i < plan.Steps.Count)
                         {
-                            // Always show done/in-progress/error steps, plus
-                            // up to MaxVisibleSteps pending steps.
+                            var step = plan.Steps[i];
                             bool isPending = step.Status == StepStatus.Pending;
-                            if (isPending && shown >= MaxVisibleSteps)
-                                continue;
 
-                            string icon;
-                            switch (step.Status)
+                            // Non-pending steps (done/in-progress/error) always shown individually
+                            if (!isPending)
                             {
-                                case StepStatus.Done: icon = "\u2713"; break;
-                                case StepStatus.InProgress: icon = "\u25BA"; break;
-                                case StepStatus.Error: icon = "\u2717"; break;
-                                default: icon = "\u25CB"; break;
+                                string icon = step.Status switch
+                                {
+                                    StepStatus.Done => "\u2713",
+                                    StepStatus.InProgress => "\u25BA",
+                                    StepStatus.Error => "\u2717",
+                                    _ => "\u25CB"
+                                };
+                                var carNames = string.Join(", ", step.Cars.Select(c => c.DisplayName));
+                                builder.AddLabel($"{icon}  {carNames}  \u2192  {step.DestinationName}");
+                                i++;
+                                continue;
                             }
 
-                            var carNames = string.Join(", ", step.Cars.Select(c => c.DisplayName));
-                            builder.AddLabel($"{icon}  {carNames}  \u2192  {step.DestinationName}");
-                            if (isPending) shown++;
+                            if (shownPending >= MaxVisibleLines)
+                            {
+                                i++;
+                                pendingLines++;
+                                continue;
+                            }
+
+                            // Group consecutive pending steps with the same destination
+                            int totalCars = step.Cars.Count;
+                            int groupEnd = i + 1;
+                            while (groupEnd < plan.Steps.Count
+                                && plan.Steps[groupEnd].Status == StepStatus.Pending
+                                && plan.Steps[groupEnd].DestinationName == step.DestinationName)
+                            {
+                                totalCars += plan.Steps[groupEnd].Cars.Count;
+                                groupEnd++;
+                            }
+
+                            if (groupEnd == i + 1)
+                            {
+                                // Single step — show car names
+                                var carNames = string.Join(", ", step.Cars.Select(c => c.DisplayName));
+                                builder.AddLabel($"\u25CB  {carNames}  \u2192  {step.DestinationName}");
+                            }
+                            else
+                            {
+                                // Multiple steps same dest — show count
+                                builder.AddLabel($"\u25CB  {totalCars} car(s)  \u2192  {step.DestinationName}");
+                            }
+
+                            shownPending++;
+                            pendingLines += groupEnd - i;
+                            i = groupEnd;
                         }
 
-                        int remaining = plan.Steps.Count(s => s.Status == StepStatus.Pending) - shown;
-                        if (remaining > 0)
-                            builder.AddLabel($"     +{remaining} more");
+                        int totalPending = plan.Steps.Count(s => s.Status == StepStatus.Pending);
+                        int hiddenPending = totalPending - pendingLines;
+                        if (hiddenPending > 0)
+                            builder.AddLabel($"     +{hiddenPending} more");
                     }
 
                     if (plan.Warnings.Count > 0)
