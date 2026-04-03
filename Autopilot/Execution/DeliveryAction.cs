@@ -35,13 +35,15 @@ namespace Autopilot.Execution
 
             if (step.CoupleTarget != null)
             {
-                // Couple to existing car on the span. We're pushing INTO the car
-                // from the approach side, so the waypoint goes on the NEAR end
-                // (the end facing our loco), not the far end.
+                // Couple to existing car on the span. Use the free (uncoupled)
+                // end — that's the end facing the approach. Don't use
+                // ClosestLogicalEndTo (crow-flies) which can pick the wrong end.
                 var graph = Graph.Shared;
-                var nearEnd = step.CoupleTarget.ClosestLogicalEndTo(loco.LocationF, graph);
+                var target = step.CoupleTarget;
+                var nearEnd = target.CoupledTo(Car.LogicalEnd.A) != null
+                    ? Car.LogicalEnd.B : Car.LogicalEnd.A;
                 var coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
-                    new CarAdapter(step.CoupleTarget), nearEnd, graph);
+                    new CarAdapter(target), nearEnd, graph);
                 var coupleLocStr = Graph.Shared.LocationToString(coupleLoc.ToLocation());
                 Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling to {step.CoupleTarget.DisplayName} " +
                     $"at end {nearEnd}, waypoint={coupleLocStr}");

@@ -313,14 +313,12 @@ namespace Autopilot.Planning
             // Couple target is the first dropped car
             var coupleTarget = firstDropped;
 
-            // Couple location: offset past the couple target on the loco-facing side.
-            var nearestEnd = coupleTarget.ClosestLogicalEndTo(loco.LocationF, graph);
-            var carEnd = coupleTarget.LogicalToEnd(nearestEnd);
-            Location coupleLoc;
-            if (carEnd == Car.End.F)
-                coupleLoc = graph.LocationByMoving(coupleTarget.LocationF, AutopilotConstants.CouplingOffsetDistance, false, true);
-            else
-                coupleLoc = graph.LocationByMoving(coupleTarget.LocationR, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
+            // Couple location: free (uncoupled) end of the couple target.
+            // Don't use ClosestLogicalEndTo (crow-flies).
+            var freeEnd = coupleTarget.CoupledTo(Car.LogicalEnd.A) != null
+                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+            var coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
+                new CarAdapter(coupleTarget), freeEnd, graph).ToLocation();
 
             var coupleLocation = DirectedPosition.FromLocation(coupleLoc);
 
