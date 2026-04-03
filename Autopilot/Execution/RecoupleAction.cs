@@ -30,8 +30,16 @@ namespace Autopilot.Execution
             var lastDropped = split.DroppedCars[split.DroppedCars.Count - 1];
             var locoPos = DirectedPosition.FromLocation(loco.LocationF);
 
-            var firstLoc = GetCoupleLocation(firstDropped, locoPos, graph);
-            var lastLoc = GetCoupleLocation(lastDropped, locoPos, graph);
+            // Use the free (uncoupled) end of each end car — not crow-flies
+            // nearest, which can pick the coupled end and place the waypoint
+            // between cars in the chain.
+            var firstFreeEnd = firstDropped.CoupledTo(Car.LogicalEnd.A) != null
+                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+            var lastFreeEnd = lastDropped.CoupledTo(Car.LogicalEnd.A) != null
+                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+
+            var firstLoc = GetCoupleLocationForEnd(new CarAdapter(firstDropped), firstFreeEnd, graph);
+            var lastLoc = GetCoupleLocationForEnd(new CarAdapter(lastDropped), lastFreeEnd, graph);
 
             var resultFirst = Planning.RouteChecker.RouteDistanceWithCars(loco.LocationF, firstLoc.ToLocation(),
                 trainService.GetCoupled(loco));
