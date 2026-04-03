@@ -435,35 +435,56 @@ namespace Autopilot.Planning
                             }
                         }
 
-                        // Verify that the runaround approach works from this waypoint.
-                        // Route from waypoint to each delivery destination and check
-                        // reversal parity. The original position had even reversals
-                        // (runaround viable); if this waypoint has odd, skip it.
+                        // Verify that the runaround approach works from this position.
+                        // CheckApproachDirection routes from the TAIL's outward end,
+                        // not the front (waypoint). Compute the tail position by
+                        // walking trainLength back from the waypoint along the branch.
                         if (deliveryDestinations != null && deliveryDestinations.Count > 0)
                         {
+                            // Tail position = trainLength behind the front (waypoint)
+                            var wpLoc = waypointPos.ToLocation();
+                            Location tailLoc;
+                            try
+                            {
+                                tailLoc = Graph.Shared.LocationByMoving(
+                                    wpLoc.Flipped(), trainLength, false, true).Flipped();
+                            }
+                            catch
+                            {
+                                tailLoc = wpLoc; // fallback
+                            }
+
                             bool anyDestReachable = false;
                             foreach (var dest in deliveryDestinations)
                             {
-                                var wpLoc = waypointPos.ToLocation();
                                 var destLoc = dest.ToLocation();
-                                if (wpLoc.segment == null || destLoc.segment == null)
+                                if (tailLoc.segment == null || destLoc.segment == null)
                                     continue;
 
-                                var wpSteps = new List<Track.Search.RouteSearch.Step>();
-                                bool wpRouteFound = Track.Search.RouteSearch.FindRoute(
-                                    Graph.Shared, wpLoc, destLoc,
-                                    RouteChecker.DefaultHeuristic, wpSteps,
-                                    out Track.Search.RouteSearch.Metrics _,
+                                // Try both directions from the tail (same as ApproachAnalyzer)
+                                var stepsA = new List<Track.Search.RouteSearch.Step>();
+                                bool foundA = Track.Search.RouteSearch.FindRoute(
+                                    Graph.Shared, tailLoc, destLoc,
+                                    RouteChecker.DefaultHeuristic, stepsA,
+                                    out Track.Search.RouteSearch.Metrics metricsA,
                                     checkForCars: false, trainLength: 0f,
                                     maxIterations: 5000, enableLogging: false);
 
-                                if (!wpRouteFound) continue;
+                                var stepsB = new List<Track.Search.RouteSearch.Step>();
+                                bool foundB = Track.Search.RouteSearch.FindRoute(
+                                    Graph.Shared, tailLoc.Flipped(), destLoc,
+                                    RouteChecker.DefaultHeuristic, stepsB,
+                                    out Track.Search.RouteSearch.Metrics metricsB,
+                                    checkForCars: false, trainLength: 0f,
+                                    maxIterations: 5000, enableLogging: false);
 
-                                int destReversals = ReversalCounter.FromSteps(wpSteps);
-                                // For a runaround to work, we need the approach to have
-                                // even reversals (preserves tail-leads after runaround).
-                                // Odd reversals would flip the orientation, cancelling
-                                // the runaround.
+                                // Pick the shorter route (same as ApproachAnalyzer)
+                                bool useA = foundA && (!foundB || metricsA.Distance <= metricsB.Distance);
+                                var bestSteps = useA ? stepsA : stepsB;
+                                bool found = useA ? foundA : foundB;
+                                if (!found) continue;
+
+                                int destReversals = ReversalCounter.FromSteps(bestSteps);
                                 if (destReversals % 2 == 0)
                                 {
                                     anyDestReachable = true;
@@ -471,7 +492,7 @@ namespace Autopilot.Planning
                                 }
                                 else
                                 {
-                                    _logger.Log("LoopValidator", $"GetRepositionLocation: waypoint→{dest.Segment?.id} has {destReversals} reversal(s) (odd) — runaround won't help");
+                                    _logger.Log("LoopValidator", $"GetRepositionLocation: tail→{dest.Segment?.id} has {destReversals} reversal(s) (odd) — runaround won't help");
                                 }
                             }
 

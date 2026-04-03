@@ -151,6 +151,7 @@ namespace Autopilot.Planning
                 foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
                 {
                     if (car.Waybill == null) continue;
+                    if (car.Waybill.Value.Completed) continue;
                     if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
                     var dest = car.Waybill.Value.Destination;
                     if (!seenDestIds.Add(dest.Identifier)) continue;
@@ -158,11 +159,14 @@ namespace Autopilot.Planning
                     {
                         if (span.lower != null)
                         {
-                            deliveryDests.Add(DirectedPosition.FromLocation(span.lower.Value));
+                            var pos = DirectedPosition.FromLocation(span.lower.Value);
+                            deliveryDests.Add(pos);
+                            Log($"Delivery dest for reversal check: {dest.DisplayName} → {pos.Segment?.id}");
                             break;
                         }
                     }
                 }
+                Log($"Total delivery destinations for reversal check: {deliveryDests.Count}");
 
                 var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDests);
                 if (repositionLoc.HasValue)
