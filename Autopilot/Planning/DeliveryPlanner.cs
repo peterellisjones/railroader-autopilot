@@ -31,6 +31,7 @@ namespace Autopilot.Planning
             _trainService.ClearPlanCaches();
             _destinationSelector.ClearCache();
             _checker.RouteChecker.ClearCache();
+            _checker.ClearCache();
         }
 
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot Planner: {msg}");
@@ -134,10 +135,13 @@ namespace Autopilot.Planning
 
             // Check if there ARE deliverable cars (just not from this position).
             // If so, reposition to a loop where we can runaround or deliver.
+            // Skip repositioning if already on a clear loop — would just bounce
+            // between loops. Use cached result since CanRunaround already called this.
             bool hasDeliverableCars = layout.SideA.Cars.Concat(layout.SideB.Cars)
                 .Any(c => c.Waybill != null && (skippedCars == null || !skippedCars.Contains((c as CarAdapter)?.Car)));
+            bool onLoop = _checker.IsOnClearLoop(loco);
 
-            if (hasDeliverableCars && !_checker.IsOnClearLoop(loco))
+            if (hasDeliverableCars && !onLoop)
             {
                 Log("No runarounds feasible — checking reposition to loop...");
 

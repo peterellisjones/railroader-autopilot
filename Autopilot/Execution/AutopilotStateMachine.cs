@@ -162,7 +162,11 @@ namespace Autopilot.Execution
             DeliveryPlan plan;
             try
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 plan = _planner.BuildPlan(_loco, p.Context.VisitedSwitches, p.Context.VisitedLoopKeys, p.Context.SkippedCars);
+                sw.Stop();
+                if (sw.ElapsedMilliseconds > 10)
+                    Loader.Mod.Logger.Log($"Autopilot: BuildPlan took {sw.ElapsedMilliseconds}ms");
             }
             catch (Exception ex)
             {
