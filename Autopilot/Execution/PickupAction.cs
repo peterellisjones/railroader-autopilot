@@ -54,8 +54,13 @@ namespace Autopilot.Execution
                     // Check for AE planner errors
                     var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
                     var status = persistence.PlannerStatus ?? "";
-                    if (status.Contains("blocked") || status.Contains("Blocked"))
-                        return new ActionFailed($"Pickup: {status}. Can't reach {_target.CoupleTarget.DisplayName}.");
+                    if (status.Contains("blocked") || status.Contains("Blocked")
+                        || status.Contains("End of Track") || status.Contains("too long"))
+                    {
+                        Loader.Mod.Logger.Log($"Autopilot Pickup: can't reach {_target.CoupleTarget.DisplayName}: {status} — skipping");
+                        // Return replan with skipped cars so FindNextPickup won't pick them again
+                        return new ActionReplan(_target.TargetCars);
+                    }
 
                     if (trainService.IsStopped(loco))
                     {

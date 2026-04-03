@@ -259,7 +259,7 @@ namespace Autopilot.Execution
             PickupTarget? target;
             try
             {
-                target = _pickupPlanner!.FindNextPickup(_loco, p.TargetDestination);
+                target = _pickupPlanner!.FindNextPickup(_loco, p.TargetDestination, p.Context.SkippedCars);
             }
             catch (Exception ex)
             {

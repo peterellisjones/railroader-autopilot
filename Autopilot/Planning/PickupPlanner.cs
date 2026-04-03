@@ -97,17 +97,12 @@ namespace Autopilot.Planning
         /// Find the nearest accessible car (or group) bound for the given
         /// destination. Returns null if no more targets are reachable.
         /// </summary>
-        public PickupTarget? FindNextPickup(BaseLocomotive loco, string destinationName)
+        public PickupTarget? FindNextPickup(BaseLocomotive loco, string destinationName,
+            HashSet<Car>? skippedCars = null)
         {
             _trainService.ClearPlanCaches();
             var nearbyCars = _trainService.GetNearbyCars(loco);
             Log($"GetNearbyCars returned {nearbyCars.Count} cars");
-
-            foreach (var car in nearbyCars)
-            {
-                var pos = car.transform.position;
-                Log($"Car: {car.DisplayName} pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) seg={car.LocationA.segment?.id} active={car.gameObject.activeInHierarchy}");
-            }
             var graph = Graph.Shared;
 
             // Find all uncoupled cars with matching waybill destination
@@ -117,12 +112,8 @@ namespace Autopilot.Planning
             {
                 var waybill = _trainService.GetWaybill(car);
                 if (waybill == null) continue;
-                if (waybill.Value.Completed)
-                {
-                    if (waybill.Value.Destination.DisplayName == destinationName)
-                        Log($"Skipping {car.DisplayName}: waybill completed");
-                    continue;
-                }
+                if (waybill.Value.Completed) continue;
+                if (skippedCars != null && skippedCars.Contains(car)) continue;
                 if (waybill.Value.Destination.DisplayName != destinationName) continue;
                 matchingCarIds.Add(car.id);
                 matchingCars[car.id] = car;
