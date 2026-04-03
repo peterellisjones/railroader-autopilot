@@ -60,12 +60,14 @@ namespace Autopilot.Planning
 
             Log($"Direct deliveries: sideA={stepsA.Count}{(stepsA.Count > 0 ? $" (first: {stepsA[0].DestinationName})" : "")}, sideB={stepsB.Count}{(stepsB.Count > 0 ? $" (first: {stepsB[0].DestinationName})" : "")}");
 
-            // If both sides have cars for the same destination, don't deliver
-            // from both sides independently — that would trap the loco between
-            // the two drops on the same siding. Skip to split logic: detach one
-            // side, deliver the other, recouple, deliver the rest.
-            bool needsConsolidation = stepsA.Count > 0 && stepsB.Count > 0
-                && SharesDestination(stepsA, stepsB);
+            // If both sides have waybilled cars for the same destination,
+            // consolidate first (runaround to put all cars on one side).
+            // Otherwise delivering one side traps the loco in the siding
+            // and the other side's cars require backing out and re-entering.
+            // Check raw waybill destinations, not just deliverable steps —
+            // approach direction may differ per side but the destination
+            // conflict still exists.
+            bool needsConsolidation = SidesShareDestination(layout.SideA, layout.SideB, skippedCars);
 
             if (needsConsolidation)
             {
@@ -275,6 +277,34 @@ namespace Autopilot.Planning
             foreach (var step in stepsB)
             {
                 if (destsA.Contains(step.DestinationName))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Check if both sides of the consist have waybilled cars for the
+        /// same destination. Uses raw waybill data, not deliverability.
+        /// </summary>
+        private static bool SidesShareDestination(CarGroup sideA, CarGroup sideB, IEnumerable<Car>? skippedCars)
+        {
+            if (sideA.IsEmpty || sideB.IsEmpty) return false;
+
+            var destsA = new HashSet<string>();
+            foreach (var car in sideA.Cars)
+            {
+                if (car.Waybill == null) continue;
+                var gameCar = (car as CarAdapter)?.Car;
+                if (skippedCars != null && gameCar != null && skippedCars.Contains(gameCar)) continue;
+                destsA.Add(car.Waybill.Value.Destination.DisplayName);
+            }
+
+            foreach (var car in sideB.Cars)
+            {
+                if (car.Waybill == null) continue;
+                var gameCar = (car as CarAdapter)?.Car;
+                if (skippedCars != null && gameCar != null && skippedCars.Contains(gameCar)) continue;
+                if (destsA.Contains(car.Waybill.Value.Destination.DisplayName))
                     return true;
             }
             return false;
