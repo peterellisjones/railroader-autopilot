@@ -110,6 +110,8 @@ namespace Autopilot.Planning
             // Single loop status check — used for both runaround feasibility
             // and reposition decisions. CanRunaround = entire consist on loop.
             var loopStatus = _checker.GetLoopStatus(loco);
+            Log($"Loop status: canRunaround={loopStatus.CanRunaround}" +
+                (loopStatus.Loop != null ? $", loop={loopStatus.Loop.SwitchAId}↔{loopStatus.Loop.SwitchBId}" : ""));
 
             if (scoreA >= scoreB && scoreA > 0)
             {

@@ -152,6 +152,7 @@ namespace Autopilot.Execution
                     return;
 
                 case ActionFailed failed:
+                    Loader.Mod.Logger.Log($"Autopilot: action failed: {failed.Reason}");
                     EnterFailed(failed.Reason, exec);
                     return;
             }
@@ -204,6 +205,8 @@ namespace Autopilot.Execution
             if (plan.HasDeliveries)
             {
                 var step = plan.Steps[0];
+                Loader.Mod.Logger.Log($"Autopilot: action=Deliver {step.Cars.Count} car(s) to {step.DestinationName}" +
+                    $" (couple={step.CoupleTarget?.DisplayName ?? "none"})");
                 var newContext = p.Context.WithClearedSwitches();
                 var action = new DeliveryAction(step, _loco, _trainService);
                 SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, step.DestinationLocation));
@@ -215,6 +218,7 @@ namespace Autopilot.Execution
             if (p.Context.PendingSplit != null)
             {
                 var split = p.Context.PendingSplit;
+                Loader.Mod.Logger.Log($"Autopilot: action=Recouple {split.DroppedCars.Count} dropped car(s)");
                 var newContext = p.Context.WithPendingSplit(null);
                 var action = new RecoupleAction(split, _loco, _trainService);
                 SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation));
@@ -223,6 +227,8 @@ namespace Autopilot.Execution
 
             if (plan.NeedsRunaround)
             {
+                Loader.Mod.Logger.Log($"Autopilot: action=Runaround, split={plan.Runaround.SplitCar.DisplayName}, " +
+                    $"couple={plan.Runaround.CoupleTarget.DisplayName}, reason={plan.Reason}");
                 var action = new RunaroundExecutionAction(plan.Runaround, _loco, _trainService);
                 SetPhase(new Executing(plan, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, plan.Runaround.CoupleLocation));
                 return;
@@ -230,6 +236,8 @@ namespace Autopilot.Execution
 
             if (plan.NeedsSplit)
             {
+                Loader.Mod.Logger.Log($"Autopilot: action=Split, drop {plan.Split.DroppedCars.Count} car(s), " +
+                    $"keep tail for {plan.Reason}");
                 var newContext = p.Context.WithPendingSplit(plan.Split);
                 var action = new SplitAction(plan.Split, _loco, _trainService);
                 SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, null));
@@ -237,6 +245,7 @@ namespace Autopilot.Execution
             }
 
             // Reposition to a loop
+            Loader.Mod.Logger.Log($"Autopilot: action=Reposition, reason={plan.Reason}");
             var repositionContext = p.Context;
             if (plan.RepositionLoopKey != null)
                 repositionContext = repositionContext.WithVisitedLoop(plan.RepositionLoopKey);

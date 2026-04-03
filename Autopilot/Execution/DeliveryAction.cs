@@ -42,7 +42,9 @@ namespace Autopilot.Execution
                 var nearEnd = step.CoupleTarget.ClosestLogicalEndTo(loco.LocationF, graph);
                 var coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
                     new CarAdapter(step.CoupleTarget), nearEnd, graph);
-                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling to {step.CoupleTarget.DisplayName} at end {nearEnd}");
+                var coupleLocStr = Graph.Shared.LocationToString(coupleLoc.ToLocation());
+                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling to {step.CoupleTarget.DisplayName} " +
+                    $"at end {nearEnd}, waypoint={coupleLocStr}");
                 trainService.SetWaypointWithCouple(loco, coupleLoc, step.CoupleTarget.id);
             }
             else
