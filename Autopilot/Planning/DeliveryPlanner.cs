@@ -105,10 +105,14 @@ namespace Autopilot.Planning
 
             Log($"Runaround scores: sideA={scoreA}, sideB={scoreB}");
 
+            // Single loop status check — used for both runaround feasibility
+            // and reposition decisions. CanRunaround = entire consist on loop.
+            var loopStatus = _checker.GetLoopStatus(loco);
+
             if (scoreA >= scoreB && scoreA > 0)
             {
                 var runaround = _runaroundBuilder.BuildRunaroundAction(loco, layout.SideA, Track.Graph.Shared, _trainService, _checker, skippedCars);
-                if (runaround != null && _checker.CanRunaround(loco, runaround))
+                if (runaround != null && loopStatus.CanRunaround)
                 {
                     var destName = flippedStepsA.Count > 0 ? flippedStepsA[0].DestinationName : "?";
                     return new DeliveryPlan(new List<DeliveryStep>(), warnings, runaround,
@@ -116,13 +120,15 @@ namespace Autopilot.Planning
                             ? $"Consolidation runaround — both sides have cars for {destName}"
                             : $"Runaround to deliver to {destName}");
                 }
-                Log("SideA runaround not feasible from current position");
+                Log(loopStatus.CanRunaround
+                    ? "SideA runaround: couldn't build action"
+                    : "SideA runaround not feasible — train not fully on loop");
                 scoreA = 0;
             }
             if (scoreB > 0)
             {
                 var runaround = _runaroundBuilder.BuildRunaroundAction(loco, layout.SideB, Track.Graph.Shared, _trainService, _checker, skippedCars);
-                if (runaround != null && _checker.CanRunaround(loco, runaround))
+                if (runaround != null && loopStatus.CanRunaround)
                 {
                     var destName = flippedStepsB.Count > 0 ? flippedStepsB[0].DestinationName : "?";
                     return new DeliveryPlan(new List<DeliveryStep>(), warnings, runaround,
@@ -130,18 +136,18 @@ namespace Autopilot.Planning
                             ? $"Consolidation runaround — both sides have cars for {destName}"
                             : $"Runaround to deliver to {destName}");
                 }
-                Log("SideB runaround not feasible from current position");
+                Log(loopStatus.CanRunaround
+                    ? "SideB runaround: couldn't build action"
+                    : "SideB runaround not feasible — train not fully on loop");
             }
 
             // Check if there ARE deliverable cars (just not from this position).
             // If so, reposition to a loop where we can runaround or deliver.
-            // Skip repositioning if already on a clear loop — would just bounce
-            // between loops. Use cached result since CanRunaround already called this.
+            // Skip if already fully on a loop — would just bounce between loops.
             bool hasDeliverableCars = layout.SideA.Cars.Concat(layout.SideB.Cars)
                 .Any(c => c.Waybill != null && (skippedCars == null || !skippedCars.Contains((c as CarAdapter)?.Car)));
-            bool onLoop = _checker.IsOnClearLoop(loco);
 
-            if (hasDeliverableCars && !onLoop)
+            if (hasDeliverableCars && !loopStatus.CanRunaround)
             {
                 Log("No runarounds feasible — checking reposition to loop...");
 

@@ -15,9 +15,9 @@ namespace Autopilot.Planning
         public ApproachAnalyzer ApproachAnalyzer { get; }
         public LoopValidator LoopValidator { get; }
 
-        // Cached per plan cycle — IsOnClearLoop is expensive (up to 5 loop searches)
-        private bool? _cachedIsOnClearLoop;
-        private string? _cachedIsOnClearLoopLocoId;
+        // Cached per plan cycle — GetLoopStatus is expensive (up to 5 loop searches)
+        private LoopStatus? _cachedLoopStatus;
+        private string? _cachedLoopStatusLocoId;
 
         public FeasibilityChecker(TrainService trainService)
         {
@@ -30,8 +30,8 @@ namespace Autopilot.Planning
 
         public void ClearCache()
         {
-            _cachedIsOnClearLoop = null;
-            _cachedIsOnClearLoopLocoId = null;
+            _cachedLoopStatus = null;
+            _cachedLoopStatusLocoId = null;
         }
 
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot Feasibility: {msg}");
@@ -45,32 +45,19 @@ namespace Autopilot.Planning
             if (!ApproachAnalyzer.CheckApproachDirection(loco, group, destLocation))
                 return false;
 
-            // Route check uses game API — convert to Location
             if (!CanRouteTo(loco, destLocation))
                 return false;
 
             return true;
         }
 
-        public bool CanRunaround(BaseLocomotive loco, RunaroundAction runaround)
+        public LoopStatus GetLoopStatus(BaseLocomotive loco)
         {
-            if (!IsOnClearLoop(loco))
-            {
-                Log("Runaround feasibility: not on a clear loop — not feasible");
-                return false;
-            }
-
-            Log("Runaround feasibility: on a clear loop — feasible");
-            return true;
-        }
-
-        public bool IsOnClearLoop(BaseLocomotive loco)
-        {
-            if (_cachedIsOnClearLoop.HasValue && _cachedIsOnClearLoopLocoId == loco.id)
-                return _cachedIsOnClearLoop.Value;
-            _cachedIsOnClearLoop = LoopValidator.IsOnClearLoop(loco);
-            _cachedIsOnClearLoopLocoId = loco.id;
-            return _cachedIsOnClearLoop.Value;
+            if (_cachedLoopStatus != null && _cachedLoopStatusLocoId == loco.id)
+                return _cachedLoopStatus;
+            _cachedLoopStatus = LoopValidator.GetLoopStatus(loco);
+            _cachedLoopStatusLocoId = loco.id;
+            return _cachedLoopStatus;
         }
 
         public (DirectedPosition? location, string? loopKey) GetRepositionLocation(

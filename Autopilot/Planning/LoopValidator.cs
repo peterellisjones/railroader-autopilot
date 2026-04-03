@@ -153,11 +153,11 @@ namespace Autopilot.Planning
         /// and reversal-clearance checks. Verifies the returned loop is the one
         /// the train is actually on (not a distant clear loop).
         /// </summary>
-        public bool IsOnClearLoop(BaseLocomotive loco)
+        public LoopStatus GetLoopStatus(BaseLocomotive loco)
         {
             var adapter = new GameGraphAdapter();
             var locoSegId = loco.LocationF.segment?.id;
-            if (locoSegId == null) return false;
+            if (locoSegId == null) return LoopStatus.NotOnLoop();
 
             // Collect all segments the consist occupies
             var consistSegIds = new HashSet<string>();
@@ -188,23 +188,14 @@ namespace Autopilot.Planning
                 if (enterA != null) loopSegIds.Add(enterA);
                 if (enterB != null) loopSegIds.Add(enterB);
 
-                // Check if the loco is on this loop
-                if (!loopSegIds.Contains(locoSegId))
-                {
-                    triedLoopKeys.Add(loop.LoopKey);
-                    continue;
-                }
-
-                // Check if the ENTIRE consist is on this loop.
-                // If any car extends onto a non-loop segment (e.g. a siding),
-                // the train can't do a runaround — it needs to reposition first.
+                // Check if the ENTIRE consist is on this loop
                 bool allOnLoop = true;
                 foreach (var segId in consistSegIds)
                 {
                     if (!loopSegIds.Contains(segId))
                     {
-                        _logger.Log("LoopValidator", $"Runaround feasibility: loco on loop {loop.SwitchAId}↔{loop.SwitchBId} " +
-                            $"but consist extends onto {segId} (not on loop)");
+                        _logger.Log("LoopValidator", $"Loop status: consist extends onto {segId} " +
+                            $"(not on loop {loop.SwitchAId}↔{loop.SwitchBId})");
                         allOnLoop = false;
                         break;
                     }
@@ -212,15 +203,15 @@ namespace Autopilot.Planning
 
                 if (allOnLoop)
                 {
-                    _logger.Log("LoopValidator", $"Runaround feasibility: fully on loop {loop.SwitchAId}↔{loop.SwitchBId} (seg={locoSegId})");
-                    return true;
+                    _logger.Log("LoopValidator", $"Loop status: fully on loop {loop.SwitchAId}↔{loop.SwitchBId}");
+                    return LoopStatus.OnLoop(loop);
                 }
 
                 triedLoopKeys.Add(loop.LoopKey);
             }
 
-            _logger.Log("LoopValidator", $"Runaround feasibility: not fully on any clear loop (seg={locoSegId})");
-            return false;
+            _logger.Log("LoopValidator", $"Loop status: not on any loop (seg={locoSegId})");
+            return LoopStatus.NotOnLoop();
         }
 
         public (DirectedPosition? location, string? loopKey) GetRepositionLocation(
