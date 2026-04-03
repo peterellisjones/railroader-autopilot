@@ -185,15 +185,42 @@ namespace Autopilot.Planning
             BaseLocomotive loco, IEnumerable<string>? visitedSwitches,
             IEnumerable<string>? visitedLoopKeys = null)
         {
+            // Try multiple loops and pick the one with the shortest route distance.
+            // The loop finder ranks by BFS graph distance, but a loop that's close
+            // by graph distance might be far by actual route (or enter mid-branch).
             var adapter = new GameGraphAdapter();
-            var loop = FindFittingLoop(loco, adapter, visitedSwitches, visitedLoopKeys);
+            var triedLoopKeys = new HashSet<string>(visitedLoopKeys ?? Array.Empty<string>());
+            var allResults = new List<(DirectedPosition waypoint, float routeDist, string loopKey, string desc)>();
 
-            if (loop == null)
+            const int MaxLoopAttempts = 5;
+            for (int attempt = 0; attempt < MaxLoopAttempts; attempt++)
+            {
+                var loop = FindFittingLoop(loco, adapter, visitedSwitches, triedLoopKeys);
+                if (loop == null) break;
+
+                var result = EvaluateLoopForReposition(loco, loop, adapter);
+                if (result.HasValue)
+                    allResults.Add(result.Value);
+
+                triedLoopKeys.Add(loop.LoopKey);
+            }
+
+            if (allResults.Count == 0)
             {
                 _logger.Log("LoopValidator", "GetRepositionLocation: no fitting loop found");
                 return (null, null);
             }
 
+            // Pick the closest by route distance
+            allResults.Sort((a, b) => a.routeDist.CompareTo(b.routeDist));
+            var best = allResults[0];
+            _logger.Log("LoopValidator", $"GetRepositionLocation: best of {allResults.Count} loop(s): {best.desc}, routeDist={best.routeDist:F0}m");
+            return (best.waypoint, best.loopKey);
+        }
+
+        private (DirectedPosition waypoint, float routeDist, string loopKey, string desc)?
+            EvaluateLoopForReposition(BaseLocomotive loco, LoopInfo loop, GameGraphAdapter adapter)
+        {
             float trainLength = _trainService.GetTrainLength(loco);
 
             // Try waypoints on ALL fitting branches (not just FittingBranch).
@@ -425,16 +452,16 @@ namespace Autopilot.Planning
 
             if (bestSwitchId != null)
             {
-                _logger.Log("LoopValidator", $"GetRepositionLocation: loop {loop.SwitchAId}↔{loop.SwitchBId}, " +
+                var desc = $"loop {loop.SwitchAId}↔{loop.SwitchBId}, " +
                     $"waypointSwitch={bestSwitchId}, branch={bestBranchDesc}, " +
                     $"trainLen={trainLength:F0}m, fouling={bestFouling:F1}m, " +
-                    $"waypointDist={bestWaypointDist:F0}m, routeDist={bestRouteDist:F0}m, " +
-                    $"waypoint on {bestWaypoint.Segment?.id}");
-                return (bestWaypoint, loop.LoopKey);
+                    $"waypointDist={bestWaypointDist:F0}m";
+                _logger.Log("LoopValidator", $"GetRepositionLocation: {desc}, routeDist={bestRouteDist:F0}m, waypoint on {bestWaypoint.Segment?.id}");
+                return (bestWaypoint, bestRouteDist, loop.LoopKey, desc);
             }
 
-            _logger.Log("LoopValidator", "GetRepositionLocation: couldn't create waypoint at either switch");
-            return (null, null);
+            _logger.Log("LoopValidator", $"GetRepositionLocation: loop {loop.SwitchAId}↔{loop.SwitchBId} — couldn't create waypoint at either switch");
+            return null;
         }
     }
 }
