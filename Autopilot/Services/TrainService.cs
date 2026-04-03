@@ -355,7 +355,7 @@ namespace Autopilot.Services
 
             foreach (var car in TrainController.Shared.Cars)
             {
-                if (!coupled.Contains(car) && car.LocationA.segment != null)
+                if (!coupled.Contains(car) && car.LocationA.segment != null && car.IsVisible)
                     result.Add(car);
             }
 
