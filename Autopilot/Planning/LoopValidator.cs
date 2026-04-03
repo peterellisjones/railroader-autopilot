@@ -156,28 +156,41 @@ namespace Autopilot.Planning
         public bool IsOnClearLoop(BaseLocomotive loco)
         {
             var adapter = new GameGraphAdapter();
-            var loop = FindFittingLoop(loco, adapter);
-            if (loop == null) return false;
-
-            // Verify the train is ON this loop, not a distant one.
-            // Check if the loco's segment is part of the loop's branches
-            // or the stem (enter leg) of either switch.
             var locoSegId = loco.LocationF.segment?.id;
             if (locoSegId == null) return false;
 
-            foreach (var branch in loop.Branches)
+            // Try multiple loops — FindFittingLoop returns the "nearest" by BFS
+            // metric, which might not be the one the train is actually on.
+            var triedLoopKeys = new HashSet<string>();
+            const int MaxAttempts = 5;
+            for (int attempt = 0; attempt < MaxAttempts; attempt++)
             {
-                if (branch.SegmentIds.Contains(locoSegId))
+                var loop = FindFittingLoop(loco, adapter, null, triedLoopKeys);
+                if (loop == null) break;
+
+                // Check if the loco's segment is part of this loop's branches
+                // or the stem (enter leg) of either switch.
+                foreach (var branch in loop.Branches)
+                {
+                    if (branch.SegmentIds.Contains(locoSegId))
+                    {
+                        _logger.Log("LoopValidator", $"Runaround feasibility: on loop {loop.SwitchAId}↔{loop.SwitchBId} (seg={locoSegId})");
+                        return true;
+                    }
+                }
+
+                var (enterA, _, _) = adapter.GetSwitchLegs(loop.SwitchAId);
+                var (enterB, _, _) = adapter.GetSwitchLegs(loop.SwitchBId);
+                if (locoSegId == enterA || locoSegId == enterB)
+                {
+                    _logger.Log("LoopValidator", $"Runaround feasibility: on stem of loop {loop.SwitchAId}↔{loop.SwitchBId} (seg={locoSegId})");
                     return true;
+                }
+
+                triedLoopKeys.Add(loop.LoopKey);
             }
 
-            // Also check stem segments at each switch
-            var (enterA, _, _) = adapter.GetSwitchLegs(loop.SwitchAId);
-            var (enterB, _, _) = adapter.GetSwitchLegs(loop.SwitchBId);
-            if (locoSegId == enterA || locoSegId == enterB)
-                return true;
-
-            _logger.Log("LoopValidator", $"Runaround feasibility: found loop {loop.SwitchAId}↔{loop.SwitchBId} but train is not on it (seg={locoSegId})");
+            _logger.Log("LoopValidator", $"Runaround feasibility: not on any clear loop (seg={locoSegId})");
             return false;
         }
 
@@ -436,35 +449,30 @@ namespace Autopilot.Planning
                         }
 
                         // Verify that the runaround approach works from this position.
-                        // CheckApproachDirection routes from the TAIL's outward end,
-                        // not the front (waypoint). Compute the tail position by
-                        // walking trainLength back from the waypoint along the branch.
+                        // For a runaround, the planner FLIPS the group — the "tail"
+                        // becomes the car nearest the loco (at the waypoint). The
+                        // approach analyzer routes from the flipped tail's outward end
+                        // in both directions and picks the shorter route.
+                        //
+                        // We simulate this by routing from the waypoint position in
+                        // both directions. We check BOTH routes' reversal counts —
+                        // the approach analyzer picks the shorter route, and that
+                        // route's reversal parity determines whether the runaround works.
                         if (deliveryDestinations != null && deliveryDestinations.Count > 0)
                         {
-                            // Tail position = trainLength behind the front (waypoint)
                             var wpLoc = waypointPos.ToLocation();
-                            Location tailLoc;
-                            try
-                            {
-                                tailLoc = Graph.Shared.LocationByMoving(
-                                    wpLoc.Flipped(), trainLength, false, true).Flipped();
-                            }
-                            catch
-                            {
-                                tailLoc = wpLoc; // fallback
-                            }
 
                             bool anyDestReachable = false;
                             foreach (var dest in deliveryDestinations)
                             {
                                 var destLoc = dest.ToLocation();
-                                if (tailLoc.segment == null || destLoc.segment == null)
+                                if (wpLoc.segment == null || destLoc.segment == null)
                                     continue;
 
-                                // Try both directions from the tail (same as ApproachAnalyzer)
+                                // Try both directions from the waypoint (same as ApproachAnalyzer)
                                 var stepsA = new List<Track.Search.RouteSearch.Step>();
                                 bool foundA = Track.Search.RouteSearch.FindRoute(
-                                    Graph.Shared, tailLoc, destLoc,
+                                    Graph.Shared, wpLoc, destLoc,
                                     RouteChecker.DefaultHeuristic, stepsA,
                                     out Track.Search.RouteSearch.Metrics metricsA,
                                     checkForCars: false, trainLength: 0f,
@@ -472,7 +480,7 @@ namespace Autopilot.Planning
 
                                 var stepsB = new List<Track.Search.RouteSearch.Step>();
                                 bool foundB = Track.Search.RouteSearch.FindRoute(
-                                    Graph.Shared, tailLoc.Flipped(), destLoc,
+                                    Graph.Shared, wpLoc.Flipped(), destLoc,
                                     RouteChecker.DefaultHeuristic, stepsB,
                                     out Track.Search.RouteSearch.Metrics metricsB,
                                     checkForCars: false, trainLength: 0f,
@@ -485,14 +493,16 @@ namespace Autopilot.Planning
                                 if (!found) continue;
 
                                 int destReversals = ReversalCounter.FromSteps(bestSteps);
+                                int otherReversals = ReversalCounter.FromSteps(useA ? stepsB : stepsA);
+
+                                _logger.Log("LoopValidator", $"GetRepositionLocation: wp→{dest.Segment?.id} " +
+                                    $"shorter={destReversals} reversal(s), other={otherReversals} reversal(s), " +
+                                    $"distA={(foundA ? metricsA.Distance : float.MaxValue):F0}, distB={(foundB ? metricsB.Distance : float.MaxValue):F0}");
+
                                 if (destReversals % 2 == 0)
                                 {
                                     anyDestReachable = true;
                                     break;
-                                }
-                                else
-                                {
-                                    _logger.Log("LoopValidator", $"GetRepositionLocation: tail→{dest.Segment?.id} has {destReversals} reversal(s) (odd) — runaround won't help");
                                 }
                             }
 
