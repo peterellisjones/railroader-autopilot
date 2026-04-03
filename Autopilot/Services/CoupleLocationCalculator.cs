@@ -22,12 +22,21 @@ namespace Autopilot.Services
             // LocationF faces outward from the car body, so positive distance moves away.
             // LocationR faces inward, so we need negative distance + Flip to move away.
             var endLoc = endPos.ToLocation();
-            Location offsetLoc;
-            if (carEnd == Car.End.F)
-                offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
-            else
-                offsetLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
-            return DirectedPosition.FromLocation(offsetLoc);
+            try
+            {
+                Location offsetLoc;
+                if (carEnd == Car.End.F)
+                    offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false);
+                else
+                    offsetLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false).Flipped();
+                return DirectedPosition.FromLocation(offsetLoc);
+            }
+            catch
+            {
+                // End of track — offset would go past the buffer stop.
+                // Use the car end position directly; the AE couples on contact.
+                return endPos;
+            }
         }
     }
 }
