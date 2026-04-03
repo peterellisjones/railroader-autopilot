@@ -57,9 +57,23 @@ namespace Autopilot.Execution
                     if (status.Contains("blocked") || status.Contains("Blocked")
                         || status.Contains("End of Track") || status.Contains("too long"))
                     {
-                        Loader.Mod.Logger.Log($"Autopilot Pickup: can't reach {_target.CoupleTarget.DisplayName}: {status} — skipping");
-                        // Return replan with skipped cars so FindNextPickup won't pick them again
-                        return new ActionReplan(_target.TargetCars);
+                        _stuckTimer += AutopilotController.TickInterval;
+
+                        // Try nudging after 3s — the train might be in a
+                        // slightly invalid position that resolves after moving.
+                        if (_stuckTimer > 3f && _stuckTimer < 5f)
+                        {
+                            Loader.Mod.Logger.Log($"Autopilot Pickup: {status} for {_target.CoupleTarget.DisplayName} — nudging");
+                            trainService.MoveDistance(loco, 2f, true);
+                        }
+
+                        // After 15s, give up and skip
+                        if (_stuckTimer > 15f)
+                        {
+                            Loader.Mod.Logger.Log($"Autopilot Pickup: can't reach {_target.CoupleTarget.DisplayName}: {status} — skipping");
+                            return new ActionReplan(_target.TargetCars);
+                        }
+                        return new InProgress();
                     }
 
                     if (trainService.IsStopped(loco))
