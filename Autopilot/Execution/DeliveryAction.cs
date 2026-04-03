@@ -213,8 +213,8 @@ namespace Autopilot.Execution
             // usable end of a short siding (past a buffer stop). Limit to
             // 1m from either end of the segment.
             float segLen = destLoc.segment.GetLength();
-            float minDist = 1f;
-            float maxDist = Math.Max(segLen - 1f, minDist);
+            float minDist = 0f;
+            float maxDist = segLen;
             if (adjusted.distance < minDist || adjusted.distance > maxDist)
             {
                 float clamped = Math.Max(minDist, Math.Min(adjusted.distance, maxDist));
