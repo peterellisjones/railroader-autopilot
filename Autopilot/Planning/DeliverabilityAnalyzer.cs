@@ -101,12 +101,13 @@ namespace Autopilot.Planning
                     break; // no span is deliverable or has space — stop
 
                 // Group consecutive cars going to the same physical track.
-                // Each car needs at least 2m of overlap with the span.
-                const float SpacePerCar = 2f;
-                int maxCars = System.Math.Max(1, (int)(availableSpace / SpacePerCar));
+                // Each car uses its full length of space, but the last car
+                // only needs 2m overlap with the span to count as delivered.
+                const float MinOverlap = 2f;
                 var firstGameCar = (car as CarAdapter)?.Car;
                 var carGroup = new List<Car> { firstGameCar };
-                while (i + carGroup.Count < group.Cars.Count && carGroup.Count < maxCars)
+                float usedSpace = 0f; // first car only needs MinOverlap
+                while (i + carGroup.Count < group.Cars.Count)
                 {
                     var nextCar = group.Cars[i + carGroup.Count];
                     if (nextCar.Waybill == null)
@@ -119,6 +120,12 @@ namespace Autopilot.Planning
                     }
                     catch { break; }
                     if (nextDestLoc.Segment == null || nextDestLoc.Segment != destLocation.Segment)
+                        break;
+                    // Previous car now needs its full length (it's no longer the last).
+                    // Next car only needs MinOverlap.
+                    var prevCar = carGroup[carGroup.Count - 1];
+                    usedSpace += prevCar?.carLength ?? car.CarLength;
+                    if (usedSpace + MinOverlap > availableSpace)
                         break;
                     carGroup.Add((nextCar as CarAdapter)?.Car);
                 }
