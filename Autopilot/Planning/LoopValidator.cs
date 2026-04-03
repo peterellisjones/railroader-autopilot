@@ -275,16 +275,136 @@ namespace Autopilot.Planning
                         var waypointLoc = Graph.Shared.LocationByMoving(atSwitch, waypointDist);
                         var waypointPos = DirectedPosition.FromLocation(waypointLoc);
 
-                        if (!_routeChecker.CanRouteTo(loco, waypointPos))
+                        // Get route with steps to detect mid-branch entry
+                        var coupled = _trainService.GetCoupled(loco);
+                        var (routeFound, routeSteps) = _routeChecker.CanRouteToWithSteps(
+                            loco, waypointPos, trainLength, coupled);
+                        if (!routeFound)
                         {
                             _logger.Log("LoopValidator", $"GetRepositionLocation: can't route to waypoint near {candidate.SwitchId} on branch [{branch.SegmentIds[0]}...]");
                             continue;
                         }
 
+                        // Check if route enters through a loop switch (Strategy 1)
+                        // or mid-branch via an intermediate junction (Strategy 2/3)
+                        bool entersViaLoopSwitch = false;
+                        foreach (var step in routeSteps)
+                        {
+                            if (step.Node != null &&
+                                (step.Node.id == loop.SwitchAId || step.Node.id == loop.SwitchBId))
+                            {
+                                entersViaLoopSwitch = true;
+                                break;
+                            }
+                        }
+
+                        string strategy;
+                        if (entersViaLoopSwitch)
+                        {
+                            // Strategy 1: via loop switch — waypoint is already correct
+                            strategy = "ViaLoopSwitch";
+                        }
+                        else
+                        {
+                            // Mid-branch entry — find the junction point (intermediate
+                            // switch where route enters the branch)
+                            var branchSegSet = new HashSet<string>(branch.SegmentIds);
+                            var intSwitchSet = new HashSet<string>(branch.IntermediateSwitchIds ?? new List<string>());
+                            string? junctionId = null;
+                            float junctionDistFromStart = 0f;
+
+                            foreach (var step in routeSteps)
+                            {
+                                if (step.Node != null && intSwitchSet.Contains(step.Node.id))
+                                {
+                                    junctionId = step.Node.id;
+                                    break;
+                                }
+                            }
+
+                            if (junctionId != null)
+                            {
+                                // Find junction position along the branch
+                                foreach (var isp in intermediateSwitchPositions)
+                                {
+                                    // Match by checking if this position corresponds to our junction
+                                    var visited2 = new HashSet<string>();
+                                    float cumDist2 = 0f;
+                                    foreach (var segId2 in branch.SegmentIds)
+                                    {
+                                        float segLen2 = adapter.GetLength(segId2);
+                                        foreach (var endA2 in new[] { true, false })
+                                        {
+                                            string nodeId2 = adapter.GetNodeAtEnd(segId2, endA2);
+                                            if (nodeId2 == junctionId && !visited2.Contains(nodeId2))
+                                            {
+                                                junctionDistFromStart = endA2 ? cumDist2 : cumDist2 + segLen2;
+                                                visited2.Add(nodeId2);
+                                            }
+                                        }
+                                        cumDist2 += segLen2;
+                                    }
+                                }
+                            }
+
+                            // Distance from junction to each loop switch along the branch
+                            float junctionToStart = junctionDistFromStart; // toward SwitchA
+                            float junctionToEnd = branch.Length - junctionDistFromStart; // toward SwitchB
+
+                            // Distance from junction to the candidate's switch
+                            bool candidateIsStart = candidate.SwitchId == loop.SwitchAId;
+                            float junctionToCandidate = candidateIsStart ? junctionToStart : junctionToEnd;
+                            float junctionToOther = candidateIsStart ? junctionToEnd : junctionToStart;
+
+                            if (junctionToCandidate >= trainLength)
+                            {
+                                // Strategy 2: mid-branch direct — train fits between
+                                // junction and this switch. Set waypoint so the front
+                                // is far enough that the tail clears the junction.
+                                waypointDist = junctionToCandidate;
+                                waypointLoc = Graph.Shared.LocationByMoving(atSwitch, waypointDist);
+                                waypointPos = DirectedPosition.FromLocation(waypointLoc);
+                                strategy = "MidBranchDirect";
+                                _logger.Log("LoopValidator", $"GetRepositionLocation: mid-branch via junction {junctionId}, " +
+                                    $"junctionToSwitch={junctionToCandidate:F0}m, trainLen={trainLength:F0}m — fits (Strategy 2)");
+                            }
+                            else if (junctionToOther >= trainLength)
+                            {
+                                // Space toward the other switch — skip this candidate,
+                                // the other candidate for the same branch will handle it
+                                _logger.Log("LoopValidator", $"GetRepositionLocation: mid-branch via junction {junctionId}, " +
+                                    $"junctionToSwitch={junctionToCandidate:F0}m < trainLen={trainLength:F0}m — " +
+                                    $"but {junctionToOther:F0}m toward other switch, skipping");
+                                continue;
+                            }
+                            else
+                            {
+                                // Strategy 3: pull-through — train doesn't fit between
+                                // junction and either switch. Set waypoint past the closer
+                                // switch on the stem so the train pulls fully through.
+                                // After reaching it, replan will enter the branch via the switch.
+                                float overshoot = trainLength - junctionToCandidate + candidate.FoulingNear;
+                                var pullThroughLoc = Graph.Shared.LocationByMoving(atSwitch, -overshoot, false, true);
+                                waypointPos = DirectedPosition.FromLocation(pullThroughLoc);
+
+                                if (!_routeChecker.CanRouteTo(loco, waypointPos))
+                                {
+                                    _logger.Log("LoopValidator", $"GetRepositionLocation: pull-through past {candidate.SwitchId} not routable — skipping");
+                                    continue;
+                                }
+
+                                strategy = "PullThrough";
+                                waypointDist = overshoot;
+                                _logger.Log("LoopValidator", $"GetRepositionLocation: mid-branch via junction {junctionId}, " +
+                                    $"neither direction fits (toCandidate={junctionToCandidate:F0}m, toOther={junctionToOther:F0}m, " +
+                                    $"trainLen={trainLength:F0}m) — pull-through {overshoot:F0}m past {candidate.SwitchId} (Strategy 3)");
+                            }
+                        }
+
                         float routeDist = _routeChecker.GraphDistanceToLoco(loco, waypointPos)?.Distance ?? float.MaxValue;
                         _logger.Log("LoopValidator", $"GetRepositionLocation: candidate switch={candidate.SwitchId}, " +
                             $"branch=[{branch.SegmentIds[0]}...{branch.SegmentIds[branch.SegmentIds.Count-1]}] len={branch.Length:F0}m, " +
-                            $"waypointDist={waypointDist:F0}m, routeDist={routeDist:F0}m, seg={waypointPos.Segment?.id}");
+                            $"waypointDist={waypointDist:F0}m, routeDist={routeDist:F0}m, seg={waypointPos.Segment?.id}, strategy={strategy}");
 
                         if (routeDist < bestRouteDist)
                         {
@@ -293,7 +413,7 @@ namespace Autopilot.Planning
                             bestSwitchId = candidate.SwitchId;
                             bestWaypointDist = waypointDist;
                             bestFouling = candidate.FoulingNear;
-                            bestBranchDesc = $"[{branch.SegmentIds[0]}...] len={branch.Length:F0}m";
+                            bestBranchDesc = $"[{branch.SegmentIds[0]}...] len={branch.Length:F0}m, {strategy}";
                         }
                     }
                     catch (Exception ex)
