@@ -59,8 +59,9 @@ namespace Autopilot.Planning
 
         public (DirectedPosition? location, string? loopKey) GetRepositionLocation(
             BaseLocomotive loco, IEnumerable<string>? visitedSwitches,
-            IEnumerable<string>? visitedLoopKeys = null)
-            => LoopValidator.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys);
+            IEnumerable<string>? visitedLoopKeys = null,
+            List<DirectedPosition>? deliveryDestinations = null)
+            => LoopValidator.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDestinations);
 
         public bool CanRouteTo(BaseLocomotive loco, DirectedPosition destination)
             => RouteChecker.CanRouteTo(loco, destination);

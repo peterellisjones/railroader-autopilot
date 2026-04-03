@@ -140,7 +140,24 @@ namespace Autopilot.Planning
             if (hasDeliverableCars)
             {
                 Log("No runarounds feasible — checking reposition to loop...");
-                var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys);
+
+                // Collect delivery destinations so the loop evaluator can verify
+                // approach feasibility from each candidate waypoint.
+                var deliveryDests = new List<DirectedPosition>();
+                foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
+                {
+                    if (car.Waybill == null) continue;
+                    if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
+                    try
+                    {
+                        var destLoc = _destinationSelector.GetDestinationLocation(car.Waybill.Value.Destination, loco);
+                        if (destLoc.Segment != null)
+                            deliveryDests.Add(destLoc);
+                    }
+                    catch { }
+                }
+
+                var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDests);
                 if (repositionLoc.HasValue)
                 {
                     // Find a destination name for the reason message.

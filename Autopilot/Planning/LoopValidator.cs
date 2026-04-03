@@ -183,7 +183,8 @@ namespace Autopilot.Planning
 
         public (DirectedPosition? location, string? loopKey) GetRepositionLocation(
             BaseLocomotive loco, IEnumerable<string>? visitedSwitches,
-            IEnumerable<string>? visitedLoopKeys = null)
+            IEnumerable<string>? visitedLoopKeys = null,
+            List<DirectedPosition>? deliveryDestinations = null)
         {
             // Try multiple loops and pick the one with the shortest route distance.
             // The loop finder ranks by BFS graph distance, but a loop that's close
@@ -198,7 +199,7 @@ namespace Autopilot.Planning
                 var loop = FindFittingLoop(loco, adapter, visitedSwitches, triedLoopKeys);
                 if (loop == null) break;
 
-                var result = EvaluateLoopForReposition(loco, loop, adapter);
+                var result = EvaluateLoopForReposition(loco, loop, adapter, deliveryDestinations);
                 if (result.HasValue)
                     allResults.Add(result.Value);
 
@@ -219,7 +220,8 @@ namespace Autopilot.Planning
         }
 
         private (DirectedPosition waypoint, float routeDist, string loopKey, string desc)?
-            EvaluateLoopForReposition(BaseLocomotive loco, LoopInfo loop, GameGraphAdapter adapter)
+            EvaluateLoopForReposition(BaseLocomotive loco, LoopInfo loop, GameGraphAdapter adapter,
+            List<DirectedPosition>? deliveryDestinations = null)
         {
             float trainLength = _trainService.GetTrainLength(loco);
 
@@ -309,18 +311,6 @@ namespace Autopilot.Planning
                         if (!routeFound)
                         {
                             _logger.Log("LoopValidator", $"GetRepositionLocation: can't route to waypoint near {candidate.SwitchId} on branch [{branch.SegmentIds[0]}...]");
-                            continue;
-                        }
-
-                        // Check reversal parity of the route to the waypoint.
-                        // If the route has an odd number of exit-to-exit switch
-                        // transitions, the train's orientation flips when it arrives.
-                        // This would cancel out the runaround, making it pointless.
-                        int routeReversals = CountRouteReversals(routeSteps);
-                        if (routeReversals % 2 != 0)
-                        {
-                            _logger.Log("LoopValidator", $"GetRepositionLocation: route to {candidate.SwitchId} " +
-                                $"has {routeReversals} reversal(s) — orientation flips, runaround won't help, skipping");
                             continue;
                         }
 
@@ -442,6 +432,53 @@ namespace Autopilot.Planning
                                 _logger.Log("LoopValidator", $"GetRepositionLocation: mid-branch via junction {junctionId}, " +
                                     $"neither direction fits (toCandidate={junctionToCandidate:F0}m, toOther={junctionToOther:F0}m, " +
                                     $"trainLen={trainLength:F0}m) — pull-through {overshoot:F0}m past {candidate.SwitchId} (Strategy 3)");
+                            }
+                        }
+
+                        // Verify that the runaround approach works from this waypoint.
+                        // Route from waypoint to each delivery destination and check
+                        // reversal parity. The original position had even reversals
+                        // (runaround viable); if this waypoint has odd, skip it.
+                        if (deliveryDestinations != null && deliveryDestinations.Count > 0)
+                        {
+                            bool anyDestReachable = false;
+                            foreach (var dest in deliveryDestinations)
+                            {
+                                var wpLoc = waypointPos.ToLocation();
+                                var destLoc = dest.ToLocation();
+                                if (wpLoc.segment == null || destLoc.segment == null)
+                                    continue;
+
+                                var wpSteps = new List<Track.Search.RouteSearch.Step>();
+                                bool wpRouteFound = Track.Search.RouteSearch.FindRoute(
+                                    Graph.Shared, wpLoc, destLoc,
+                                    RouteChecker.DefaultHeuristic, wpSteps,
+                                    out Track.Search.RouteSearch.Metrics _,
+                                    checkForCars: false, trainLength: 0f,
+                                    maxIterations: 5000, enableLogging: false);
+
+                                if (!wpRouteFound) continue;
+
+                                int destReversals = CountRouteReversals(wpSteps);
+                                // For a runaround to work, we need the approach to have
+                                // even reversals (preserves tail-leads after runaround).
+                                // Odd reversals would flip the orientation, cancelling
+                                // the runaround.
+                                if (destReversals % 2 == 0)
+                                {
+                                    anyDestReachable = true;
+                                    break;
+                                }
+                                else
+                                {
+                                    _logger.Log("LoopValidator", $"GetRepositionLocation: waypoint→{dest.Segment?.id} has {destReversals} reversal(s) (odd) — runaround won't help");
+                                }
+                            }
+
+                            if (!anyDestReachable)
+                            {
+                                _logger.Log("LoopValidator", $"GetRepositionLocation: no delivery destination reachable with even reversals from {candidate.SwitchId} — skipping");
+                                continue;
                             }
                         }
 
