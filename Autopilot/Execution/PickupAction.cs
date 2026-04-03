@@ -51,9 +51,19 @@ namespace Autopilot.Execution
                         return new InProgress();
                     }
 
-                    // Check for AE planner errors
                     var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
                     var status = persistence.PlannerStatus ?? "";
+                    var orders = persistence.Orders;
+                    bool stopped = trainService.IsStopped(loco);
+                    bool wpSatisfied = trainService.IsWaypointSatisfied(loco);
+                    bool wpMode = trainService.IsWaypointMode(loco);
+
+                    if (_waitTimer < 2f || (int)(_waitTimer * 2) % 10 == 0) // log first 2s, then every 5s
+                        Loader.Mod.Logger.Log($"Autopilot Pickup tick: target={_target.CoupleTarget.DisplayName}, " +
+                            $"status={status}, mode={orders.Mode}, hasWP={orders.Waypoint.HasValue}, " +
+                            $"stopped={stopped}, wpSatisfied={wpSatisfied}, timer={_waitTimer:F1}s");
+
+                    // Check for AE planner errors
                     if (status.Contains("blocked") || status.Contains("Blocked")
                         || status.Contains("End of Track") || status.Contains("too long"))
                     {
@@ -61,11 +71,12 @@ namespace Autopilot.Execution
                         return new ActionReplan(_target.TargetCars);
                     }
 
-                    // If the AE isn't moving toward the waypoint (satisfied
-                    // or no waypoint), skip immediately — the car is unreachable.
-                    if (trainService.IsWaypointSatisfied(loco))
+                    // If the AE isn't moving toward the car, skip.
+                    // "At waypoint" + stopped + not coupled = AE thinks it's
+                    // there but can't couple (wrong position or unreachable).
+                    if (wpSatisfied || (stopped && status.Contains("At waypoint") && _stuckTimer > 5f))
                     {
-                        Loader.Mod.Logger.Log($"Autopilot Pickup: waypoint satisfied but not coupled to {_target.CoupleTarget.DisplayName} — skipping");
+                        Loader.Mod.Logger.Log($"Autopilot Pickup: AE not moving to {_target.CoupleTarget.DisplayName} (status={status}) — skipping");
                         return new ActionReplan(_target.TargetCars);
                     }
 
