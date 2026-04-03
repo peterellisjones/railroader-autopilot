@@ -52,7 +52,7 @@ namespace Autopilot.Services
             var location = target.ToLocation();
             var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
             var helper = new AutoEngineerOrdersHelper(loco, persistence);
-            helper.SetOrdersValue(AutoEngineerMode.Waypoint, null, null, null, (location, null));
+            helper.SetOrdersValue(AutoEngineerMode.Waypoint, null, Loader.Settings.maxSpeedMph, null, (location, null));
 
             // Update the waypoint overlay so the marker appears on the track.
             // The overlay controller lives on the locomotive's GameObject.
@@ -77,7 +77,7 @@ namespace Autopilot.Services
             // internally triggers it. A second call interrupts the route planning.
             var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
             var helper = new AutoEngineerOrdersHelper(loco, persistence);
-            helper.SetOrdersValue(AutoEngineerMode.Waypoint, null, null, null, (location.Clamped(), coupleToCarId));
+            helper.SetOrdersValue(AutoEngineerMode.Waypoint, null, Loader.Settings.maxSpeedMph, null, (location.Clamped(), coupleToCarId));
 
             var orders = persistence.Orders;
             Loader.Mod.Logger.Log($"Autopilot SetWaypointWithCouple: after set: mode={orders.Mode}, hasWaypoint={orders.Waypoint.HasValue}, speed={orders.MaxSpeedMph}, plannerStatus={persistence.PlannerStatus}");
