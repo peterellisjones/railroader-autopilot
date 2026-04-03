@@ -22,14 +22,15 @@ namespace Autopilot.Services
             var carEnd = target.LogicalToEnd(logicalEnd);
             var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
             // Move CouplingOffsetDistance past the car end.
-            // LocationF faces outward from the car body, so positive distance moves away.
-            // LocationR faces inward, so we need negative distance + Flip to move away.
-            // Use the car's end position directly. The AE couples on
-            // contact — no need for an offset past the car body.
-            // The offset caused "End of Track" errors when the car was
-            // near a buffer stop (track extends slightly past the car
-            // but the AE can't route there with the full train).
-            return endPos;
+            // The AE needs the waypoint slightly past the car body to
+            // trigger coupling. Clamp to end of track if needed.
+            var endLoc = endPos.ToLocation();
+            Location offsetLoc;
+            if (carEnd == Car.End.F)
+                offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
+            else
+                offsetLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
+            return DirectedPosition.FromLocation(offsetLoc);
         }
     }
 }
