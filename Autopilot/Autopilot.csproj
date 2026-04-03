@@ -31,10 +31,6 @@
     <None Include="..\Info.json" CopyToOutputDirectory="PreserveNewest" Link="Info.json" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="System.Collections.Immutable" Version="8.0.0" />
-  </ItemGroup>
-
   <!-- Game assemblies -->
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
