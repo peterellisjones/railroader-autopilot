@@ -69,6 +69,20 @@ namespace Autopilot.Execution
             SetPhase(new PlanningPhase(PlanningContext.Empty, mode, destinationName));
         }
 
+        public void Resume(BaseLocomotive loco, SavedAutopilotState savedState)
+        {
+            _loco = loco;
+
+            if (_pickupPlanner == null)
+                _pickupPlanner = new PickupPlanner(_trainService);
+
+            SetPhase(new PlanningPhase(
+                savedState.Context,
+                savedState.Mode,
+                savedState.TargetDestination,
+                savedState.PickupCount));
+        }
+
         public void Stop()
         {
             if (_loco != null)
@@ -323,6 +337,25 @@ namespace Autopilot.Execution
         private void SetPhase(AutopilotPhase newPhase)
         {
             Phase = newPhase;
+
+            // Persist state for save/load resume
+            if (_loco != null)
+            {
+                switch (newPhase)
+                {
+                    case PlanningPhase p:
+                        _trainService.SaveAutopilotState(_loco, p.Mode, p.TargetDestination, p.PickupCount, p.Context);
+                        break;
+                    case Executing e:
+                        _trainService.SaveAutopilotState(_loco, e.Mode, e.TargetDestination, e.PickupCount, e.Context);
+                        break;
+                    default:
+                        // Idle, Completed, Failed — clear saved state so we don't resume
+                        _trainService.ClearAutopilotState(_loco);
+                        break;
+                }
+            }
+
             OnStateChanged?.Invoke();
         }
     }
