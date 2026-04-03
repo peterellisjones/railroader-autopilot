@@ -137,8 +137,8 @@ namespace Autopilot
             }
             _coroutines.Clear();
 
-            foreach (var sm in _stateMachines.Values)
-                sm.Stop();
+            // Don't call sm.Stop() — that would clear persisted state via SetPhase(Idle).
+            // The map is unloading, so game objects are being destroyed anyway.
             _stateMachines.Clear();
         }
 

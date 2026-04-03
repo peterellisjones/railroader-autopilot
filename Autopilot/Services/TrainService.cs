@@ -23,6 +23,7 @@ namespace Autopilot.Services
         private const string TargetDestinationKey = "autopilot.targetDestination";
         private const string PickupCountKey = "autopilot.pickupCount";
         private const string ContextKey = "autopilot.context";
+        private const string DeliverAfterPickupKey = "autopilot.deliverAfterPickup";
 
         // Per-plan-cycle caches — cleared by DeliveryPlanner.BuildPlan()
         private List<Car>? _cachedCoupled;
@@ -201,7 +202,8 @@ namespace Autopilot.Services
         }
 
         public void SaveAutopilotState(BaseLocomotive loco, AutopilotMode mode,
-            string? targetDestination, int pickupCount, PlanningContext context)
+            string? targetDestination, int pickupCount, PlanningContext context,
+            bool deliverAfterPickup)
         {
             loco.KeyValueObject[ActiveKey] = Value.Bool(true);
             loco.KeyValueObject[ModeKey] = Value.String(mode.ToString());
@@ -209,6 +211,7 @@ namespace Autopilot.Services
                 ? Value.String(targetDestination) : Value.Null();
             loco.KeyValueObject[PickupCountKey] = Value.Int(pickupCount);
             loco.KeyValueObject[ContextKey] = Value.String(context.Serialize());
+            loco.KeyValueObject[DeliverAfterPickupKey] = Value.Bool(deliverAfterPickup);
         }
 
         public void ClearAutopilotState(BaseLocomotive loco)
@@ -218,6 +221,7 @@ namespace Autopilot.Services
             loco.KeyValueObject[TargetDestinationKey] = Value.Null();
             loco.KeyValueObject[PickupCountKey] = Value.Null();
             loco.KeyValueObject[ContextKey] = Value.Null();
+            loco.KeyValueObject[DeliverAfterPickupKey] = Value.Null();
         }
 
         public SavedAutopilotState? LoadAutopilotState(BaseLocomotive loco)
@@ -256,7 +260,10 @@ namespace Autopilot.Services
                 }
             }
 
-            return new SavedAutopilotState(mode, targetDestination, pickupCount, context);
+            var deliverAfterVal = loco.KeyValueObject[DeliverAfterPickupKey];
+            bool deliverAfterPickup = !deliverAfterVal.IsNull && deliverAfterVal.BoolValue;
+
+            return new SavedAutopilotState(mode, targetDestination, pickupCount, context, deliverAfterPickup);
         }
 
         public bool IsWaypointMode(BaseLocomotive loco)

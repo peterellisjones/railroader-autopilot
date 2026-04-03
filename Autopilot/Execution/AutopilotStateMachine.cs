@@ -76,6 +76,8 @@ namespace Autopilot.Execution
             if (_pickupPlanner == null)
                 _pickupPlanner = new PickupPlanner(_trainService);
 
+            DeliverAfterPickup = savedState.DeliverAfterPickup;
+
             SetPhase(new PlanningPhase(
                 savedState.Context,
                 savedState.Mode,
@@ -344,10 +346,10 @@ namespace Autopilot.Execution
                 switch (newPhase)
                 {
                     case PlanningPhase p:
-                        _trainService.SaveAutopilotState(_loco, p.Mode, p.TargetDestination, p.PickupCount, p.Context);
+                        _trainService.SaveAutopilotState(_loco, p.Mode, p.TargetDestination, p.PickupCount, p.Context, DeliverAfterPickup);
                         break;
                     case Executing e:
-                        _trainService.SaveAutopilotState(_loco, e.Mode, e.TargetDestination, e.PickupCount, e.Context);
+                        _trainService.SaveAutopilotState(_loco, e.Mode, e.TargetDestination, e.PickupCount, e.Context, DeliverAfterPickup);
                         break;
                     default:
                         // Idle, Completed, Failed — clear saved state so we don't resume
