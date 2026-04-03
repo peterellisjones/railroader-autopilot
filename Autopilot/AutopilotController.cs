@@ -1,6 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using GalaSoft.MvvmLight.Messaging;
+using Game.Events;
 using Model;
 using Autopilot.Execution;
 using Autopilot.Model;
@@ -30,6 +33,17 @@ namespace Autopilot
         {
             if (Instance == this)
                 Instance = null;
+        }
+
+        private void OnEnable()
+        {
+            Messenger.Default.Register<PropertiesDidRestore>(this, OnPropertiesDidRestore);
+            Messenger.Default.Register<MapDidUnloadEvent>(this, OnMapDidUnload);
+        }
+
+        private void OnDisable()
+        {
+            Messenger.Default.Unregister(this);
         }
 
         /// <summary>
@@ -112,6 +126,59 @@ namespace Autopilot
                 StopCoroutine(coroutine);
                 _coroutines.Remove(loco);
             }
+        }
+
+        private void StopAll()
+        {
+            foreach (var kvp in _coroutines)
+            {
+                if (kvp.Value != null)
+                    StopCoroutine(kvp.Value);
+            }
+            _coroutines.Clear();
+
+            foreach (var sm in _stateMachines.Values)
+                sm.Stop();
+            _stateMachines.Clear();
+        }
+
+        private void OnMapDidUnload(MapDidUnloadEvent evt)
+        {
+            Loader.Mod.Logger.Log("Autopilot: Map unloading, stopping all state machines.");
+            StopAll();
+        }
+
+        private void ResumeFromSave(BaseLocomotive loco, SavedAutopilotState savedState)
+        {
+            // Stop any existing autopilot for this loco (shouldn't happen, but be safe)
+            StopAutopilot(loco);
+
+            var sm = new AutopilotStateMachine(_trainService);
+            _stateMachines[loco] = sm;
+            sm.Resume(loco, savedState);
+            _coroutines[loco] = StartCoroutine(TickLoop(loco, sm));
+
+            Loader.Mod.Logger.Log($"Autopilot: Resumed {loco.DisplayName} in {savedState.Mode} mode.");
+        }
+
+        private void OnPropertiesDidRestore(PropertiesDidRestore evt)
+        {
+            if (TrainController.Shared == null)
+                return;
+
+            int resumed = 0;
+            foreach (var loco in TrainController.Shared.Cars.OfType<BaseLocomotive>())
+            {
+                var savedState = _trainService.LoadAutopilotState(loco);
+                if (savedState != null)
+                {
+                    ResumeFromSave(loco, savedState);
+                    resumed++;
+                }
+            }
+
+            if (resumed > 0)
+                Loader.Mod.Logger.Log($"Autopilot: Resumed {resumed} locomotive(s) from save.");
         }
 
         public void RetryAutopilot()
