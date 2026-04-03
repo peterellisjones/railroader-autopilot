@@ -106,6 +106,11 @@ namespace Autopilot.Execution
             if (_loco == null)
                 return;
 
+            // Clear per-plan-cycle caches so execution actions see fresh
+            // coupling state. The caches are still useful within BuildPlan
+            // (which runs inside a single tick).
+            _trainService.ClearPlanCaches();
+
             switch (Phase)
             {
                 case Executing exec:

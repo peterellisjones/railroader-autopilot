@@ -167,7 +167,12 @@ namespace Autopilot.Execution
         private ActionOutcome TickBackingAway(BaseLocomotive loco, TrainService trainService)
         {
             if (trainService.IsStoppedForDuration(loco, 0.5f))
+            {
+                // Yard mode persists after MoveDistance completes — switch back
+                // to waypoint mode so the AE is ready for the next action.
+                trainService.StopAE(loco);
                 return new ActionReplan();
+            }
             return new InProgress();
         }
 
