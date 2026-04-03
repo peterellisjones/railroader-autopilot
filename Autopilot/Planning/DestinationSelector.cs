@@ -15,7 +15,7 @@ namespace Autopilot.Planning
         private readonly TrainService _trainService;
         private readonly RouteChecker _routeChecker;
 
-        private Dictionary<string, List<(DirectedPosition loc, Car coupleTo)>>? _destCache;
+        private Dictionary<string, List<(DirectedPosition loc, Car coupleTo, float availableSpace)>>? _destCache;
 
         public void ClearCache()
         {
@@ -35,9 +35,9 @@ namespace Autopilot.Planning
         ///   3. Spans with pending-waybill cars (avoid blocking their exit)
         /// Within each tier, sorted by distance (closest first).
         /// </summary>
-        public List<(DirectedPosition loc, Car coupleTo)> GetDestinationCandidates(OpsCarPosition destination, BaseLocomotive loco)
+        public List<(DirectedPosition loc, Car coupleTo, float availableSpace)> GetDestinationCandidates(OpsCarPosition destination, BaseLocomotive loco)
         {
-            _destCache ??= new Dictionary<string, List<(DirectedPosition loc, Car coupleTo)>>();
+            _destCache ??= new Dictionary<string, List<(DirectedPosition loc, Car coupleTo, float availableSpace)>>();
             if (_destCache.TryGetValue(destination.Identifier, out var cached))
                 return cached;
 
@@ -45,7 +45,7 @@ namespace Autopilot.Planning
             var coupled = new HashSet<Car>(_trainService.GetCoupled(loco));
 
             // priority: 0 = completed cars (best), 1 = empty, 2 = pending cars (avoid)
-            var candidates = new List<(DirectedPosition loc, float dist, int priority, Car coupleTo)>();
+            var candidates = new List<(DirectedPosition loc, float dist, int priority, Car coupleTo, float availableSpace)>();
 
             Loader.Mod.Logger.Log($"Autopilot GetDestinationCandidates: {destination.DisplayName} has {destination.Spans.Length} span(s)");
             foreach (var span in destination.Spans)
@@ -64,9 +64,11 @@ namespace Autopilot.Planning
                     Loader.Mod.Logger.Log($"  span segments: [{string.Join(", ", spanSegIds)}]");
 
                 // Find the nearest existing car anywhere within this span
+                // and compute occupied space for available-space calculation
                 Car nearestCar = null;
                 float nearestCarDist = float.MaxValue;
                 bool hasPendingWaybill = false;
+                float occupiedLength = 0f;
 
                 foreach (var car in TrainController.Shared.Cars)
                 {
@@ -77,6 +79,8 @@ namespace Autopilot.Planning
                     if ((segA == null || !spanSegIds.Contains(segA)) &&
                         (segB == null || !spanSegIds.Contains(segB)))
                         continue;
+
+                    occupiedLength += car.carLength;
 
                     bool completed = car.Waybill.HasValue && car.Waybill.Value.Completed;
                     // Only cars with an actual pending waybill (not yet completed)
@@ -103,6 +107,8 @@ namespace Autopilot.Planning
                     }
                 }
 
+                float availableSpace = span.Length - occupiedLength;
+
                 // If there's an existing car, offer a coupling candidate
                 if (nearestCar != null)
                 {
@@ -117,7 +123,7 @@ namespace Autopilot.Planning
                     var couplePos = DirectedPosition.FromLocation(coupleLoc);
                     int priority = hasPendingWaybill ? 2 : 0;
                     float dist = _routeChecker.GraphDistanceToLoco(loco, couplePos)?.Distance ?? float.MaxValue;
-                    candidates.Add((couplePos, dist, priority, nearestCar));
+                    candidates.Add((couplePos, dist, priority, nearestCar, availableSpace));
                 }
 
                 // Also offer span endpoints as empty-span candidates
@@ -129,7 +135,7 @@ namespace Autopilot.Planning
                 foreach (var endpoint in endpoints)
                 {
                     float dist = _routeChecker.GraphDistanceToLoco(loco, endpoint)?.Distance ?? float.MaxValue;
-                    candidates.Add((endpoint, dist, 1, null));
+                    candidates.Add((endpoint, dist, 1, null, availableSpace));
                 }
             }
 
@@ -140,7 +146,7 @@ namespace Autopilot.Planning
                     return a.priority.CompareTo(b.priority);
                 return a.dist.CompareTo(b.dist);
             });
-            var result = candidates.ConvertAll(c => (c.loc, c.coupleTo));
+            var result = candidates.ConvertAll(c => (c.loc, c.coupleTo, c.availableSpace));
             _destCache[destination.Identifier] = result;
             return result;
         }
@@ -151,6 +157,18 @@ namespace Autopilot.Planning
             if (candidates.Count > 0)
                 return candidates[0].loc;
             return DirectedPosition.FromLocation((Location)destination);
+        }
+
+        /// <summary>
+        /// Get available space (in meters) for the best candidate span of a destination.
+        /// Returns 0 if no candidates found.
+        /// </summary>
+        public float GetAvailableSpace(OpsCarPosition destination, BaseLocomotive loco)
+        {
+            var candidates = GetDestinationCandidates(destination, loco);
+            if (candidates.Count > 0)
+                return candidates[0].availableSpace;
+            return 0f;
         }
 
         /// <summary>

@@ -44,7 +44,7 @@ namespace Autopilot.Planning
                 }
 
                 var destination = waybill.Value.Destination;
-                List<(DirectedPosition loc, Car coupleTo)> destCandidates;
+                List<(DirectedPosition loc, Car coupleTo, float availableSpace)> destCandidates;
                 try
                 {
                     destCandidates = _destinationSelector.GetDestinationCandidates(destination, loco);
@@ -61,29 +61,35 @@ namespace Autopilot.Planning
                     continue;
                 }
 
-                // Pick the first candidate span that passes the feasibility check.
-                // For multi-segment destinations, the closest span might be blocked
-                // by other cars — try the next one.
+                // Pick the first candidate span that passes route feasibility
+                // AND has space for at least one car.
                 DirectedPosition destLocation = default;
                 Car? coupleTarget = null;
+                float availableSpace = 0f;
                 bool foundDest = false;
                 foreach (var candidate in destCandidates)
                 {
                     if (candidate.loc.Segment == null) continue;
+                    if (candidate.availableSpace < car.CarLength)
+                        continue; // not enough space on this span
                     if (checker.CanDeliver(loco, group, candidate.loc))
                     {
                         destLocation = candidate.loc;
                         coupleTarget = candidate.coupleTo;
+                        availableSpace = candidate.availableSpace;
                         foundDest = true;
                         break;
                     }
                 }
 
                 if (!foundDest)
-                    break; // no span is deliverable — stop (same as old CanDeliver break)
+                    break; // no span is deliverable or has space — stop
 
-                // Group consecutive cars going to the same physical track.
-                var carGroup = new List<Car> { (car as CarAdapter)?.Car };
+                // Group consecutive cars going to the same physical track,
+                // limited by available space on the destination.
+                var firstGameCar = (car as CarAdapter)?.Car;
+                var carGroup = new List<Car> { firstGameCar };
+                float usedSpace = firstGameCar?.carLength ?? car.CarLength;
                 while (i + carGroup.Count < group.Cars.Count)
                 {
                     var nextCar = group.Cars[i + carGroup.Count];
@@ -98,7 +104,11 @@ namespace Autopilot.Planning
                     catch { break; }
                     if (nextDestLoc.Segment == null || nextDestLoc.Segment != destLocation.Segment)
                         break;
+                    float nextLen = (nextCar as CarAdapter)?.Car?.carLength ?? nextCar.CarLength;
+                    if (usedSpace + nextLen + AutopilotConstants.ConsistGapPerCar > availableSpace)
+                        break; // no room for this car
                     carGroup.Add((nextCar as CarAdapter)?.Car);
+                    usedSpace += nextLen + AutopilotConstants.ConsistGapPerCar;
                 }
 
                 steps.Add(new DeliveryStep(carGroup, destination, destLocation, coupleTarget));
