@@ -141,20 +141,27 @@ namespace Autopilot.Planning
             {
                 Log("No runarounds feasible — checking reposition to loop...");
 
-                // Collect delivery destinations so the loop evaluator can verify
-                // approach feasibility from each candidate waypoint.
+                // Collect delivery span locations so the loop evaluator can verify
+                // approach feasibility from each candidate waypoint. Use the raw
+                // span lower bound (same target CheckApproachDirection routes to),
+                // not GetDestinationLocation which returns a coupling waypoint that
+                // may be on a different segment.
                 var deliveryDests = new List<DirectedPosition>();
+                var seenDestIds = new HashSet<string>();
                 foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
                 {
                     if (car.Waybill == null) continue;
                     if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
-                    try
+                    var dest = car.Waybill.Value.Destination;
+                    if (!seenDestIds.Add(dest.Identifier)) continue;
+                    foreach (var span in dest.Spans)
                     {
-                        var destLoc = _destinationSelector.GetDestinationLocation(car.Waybill.Value.Destination, loco);
-                        if (destLoc.Segment != null)
-                            deliveryDests.Add(destLoc);
+                        if (span.lower != null)
+                        {
+                            deliveryDests.Add(DirectedPosition.FromLocation(span.lower.Value));
+                            break;
+                        }
                     }
-                    catch { }
                 }
 
                 var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDests);
