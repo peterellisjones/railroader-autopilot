@@ -102,9 +102,14 @@ namespace Autopilot.Planning
                     ? Car.LogicalEnd.A : Car.LogicalEnd.B;
             }
 
-            // Coupler location: far end of couple target, offset past car body
-            var locoPos = DirectedPosition.FromLocation(loco.LocationF);
-            var coupleLocation = GetCoupleLocation(coupleTarget!, locoPos, graph);
+            // Couple location: the free (uncoupled) end of the couple target.
+            // This is the end facing AWAY from the rest of the car group —
+            // after the runaround, the loco approaches from this side.
+            // Don't use ClosestLogicalEndTo (crow-flies) as the loco may be
+            // near a siding that makes crow-flies unreliable.
+            var freeEnd = coupleTarget!.CoupledTo(Car.LogicalEnd.A) != null
+                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+            var coupleLocation = GetCoupleLocationForEnd(coupleTarget!, freeEnd, graph);
 
             // Only include cars being detached (tail up to split point)
             var disconnectedCars = group.Cars.Take(splitIdx + 1).Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
