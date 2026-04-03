@@ -19,7 +19,7 @@ namespace Autopilot.Planning
         }
 
         public List<DeliveryStep> GetDeliverableSteps(BaseLocomotive loco, CarGroup group,
-            FeasibilityChecker checker, IEnumerable<Car>? skippedCars = null)
+            FeasibilityChecker checker, IEnumerable<Car>? skippedCars = null, int maxSteps = int.MaxValue)
         {
             var steps = new List<DeliveryStep>();
             if (group.IsEmpty) return steps;
@@ -112,6 +112,8 @@ namespace Autopilot.Planning
                 }
 
                 steps.Add(new DeliveryStep(carGroup, destination, destLocation, coupleTarget));
+                if (steps.Count >= maxSteps)
+                    return steps;
                 i += carGroup.Count;
             }
 

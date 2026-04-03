@@ -63,10 +63,8 @@ namespace Autopilot.Planning
                 if (Loader.Settings?.verboseLogging == true)
                     Loader.Mod.Logger.Log($"  span segments: [{string.Join(", ", spanSegIds)}]");
 
-                // Find the nearest existing car anywhere within this span
-                // and compute occupied space for available-space calculation
-                Car nearestCar = null;
-                float nearestCarDist = float.MaxValue;
+                // Find existing cars on this span and compute occupied space.
+                var carsOnSpan = new List<Car>();
                 bool hasPendingWaybill = false;
                 float occupiedLength = 0f;
 
@@ -82,47 +80,48 @@ namespace Autopilot.Planning
 
                     occupiedLength += car.carLength;
 
-                    bool completed = car.Waybill.HasValue && car.Waybill.Value.Completed;
-                    // Only cars with an actual pending waybill (not yet completed)
-                    // count as pending. Cars with no waybill (tenders, locos for
-                    // sale) are just parked — they don't block the span.
                     if (car.Waybill.HasValue && !car.Waybill.Value.Completed)
                         hasPendingWaybill = true;
 
-                    if (Loader.Settings?.verboseLogging == true)
-                        Loader.Mod.Logger.Log($"  found car {car.DisplayName} on seg={segA ?? segB}, " +
-                            $"waybill={car.Waybill.HasValue}, completed={completed}");
-
-                    var carPosA = DirectedPosition.FromLocation(car.LocationA);
-                    var carPosB = DirectedPosition.FromLocation(car.LocationB);
-                    var resultA = _routeChecker.GraphDistanceToLoco(loco, carPosA);
-                    var resultB = _routeChecker.GraphDistanceToLoco(loco, carPosB);
-                    float dA = resultA?.Distance ?? float.MaxValue;
-                    float dB = resultB?.Distance ?? float.MaxValue;
-                    float d = System.Math.Min(dA, dB);
-                    if (d < nearestCarDist)
-                    {
-                        nearestCarDist = d;
-                        nearestCar = car;
-                    }
+                    carsOnSpan.Add(car);
                 }
 
                 float availableSpace = span.Length - occupiedLength;
 
-                // If there's an existing car, offer a coupling candidate
-                if (nearestCar != null)
+                // If there are existing cars, find the one nearest the loco
+                // for coupling. Only do one GraphDistanceToLoco call per car
+                // (using just one end, not both).
+                if (carsOnSpan.Count > 0)
                 {
+                    Car nearestCar = carsOnSpan[0];
+                    if (carsOnSpan.Count > 1)
+                    {
+                        // Multiple cars — find nearest by one route search each
+                        float bestDist = float.MaxValue;
+                        foreach (var car in carsOnSpan)
+                        {
+                            var pos = DirectedPosition.FromLocation(car.LocationA);
+                            float d = _routeChecker.GraphDistanceToLoco(loco, pos)?.Distance ?? float.MaxValue;
+                            if (d < bestDist)
+                            {
+                                bestDist = d;
+                                nearestCar = car;
+                            }
+                        }
+                    }
+
+                    // Find which end of the nearest car is closer to the loco
                     var carPosA = DirectedPosition.FromLocation(nearestCar.LocationA);
                     var carPosB = DirectedPosition.FromLocation(nearestCar.LocationB);
-                    var resultA2 = _routeChecker.GraphDistanceToLoco(loco, carPosA);
-                    var resultB2 = _routeChecker.GraphDistanceToLoco(loco, carPosB);
-                    float dA2 = resultA2?.Distance ?? float.MaxValue;
-                    float dB2 = resultB2?.Distance ?? float.MaxValue;
-                    var nearCarEndLoc = dA2 <= dB2 ? nearestCar.LocationA : nearestCar.LocationB;
+                    var resultA = _routeChecker.GraphDistanceToLoco(loco, carPosA);
+                    var resultB = _routeChecker.GraphDistanceToLoco(loco, carPosB);
+                    float dA = resultA?.Distance ?? float.MaxValue;
+                    float dB = resultB?.Distance ?? float.MaxValue;
+                    var nearCarEndLoc = dA <= dB ? nearestCar.LocationA : nearestCar.LocationB;
                     var coupleLoc = graph.LocationByMoving(nearCarEndLoc, -1f, false, true).Flipped();
                     var couplePos = DirectedPosition.FromLocation(coupleLoc);
                     int priority = hasPendingWaybill ? 2 : 0;
-                    float dist = _routeChecker.GraphDistanceToLoco(loco, couplePos)?.Distance ?? float.MaxValue;
+                    float dist = System.Math.Min(dA, dB);
                     candidates.Add((couplePos, dist, priority, nearestCar, availableSpace));
                 }
 

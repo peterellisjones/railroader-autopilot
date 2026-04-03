@@ -53,10 +53,10 @@ namespace Autopilot.Planning
                 return new DeliveryPlan(new List<DeliveryStep>(), warnings);
             }
 
-            // Check both sides for direct deliveries
-            // GetDeliverableSteps pre-checks route feasibility (train length, blocked track)
-            var stepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideA, _checker, skippedCars);
-            var stepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideB, _checker, skippedCars);
+            // Check both sides for direct deliveries. Only need the first step —
+            // we deliver one step at a time and replan after each.
+            var stepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideA, _checker, skippedCars, maxSteps: 1);
+            var stepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideB, _checker, skippedCars, maxSteps: 1);
 
             Log($"Direct deliveries: sideA={stepsA.Count}{(stepsA.Count > 0 ? $" (first: {stepsA[0].DestinationName})" : "")}, sideB={stepsB.Count}{(stepsB.Count > 0 ? $" (first: {stepsB[0].DestinationName})" : "")}");
 
@@ -88,8 +88,10 @@ namespace Autopilot.Planning
                 : "No direct deliveries — checking runarounds...");
             var flippedA = layout.SideA.Reversed();
             var flippedB = layout.SideB.Reversed();
-            var flippedStepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedA, _checker, skippedCars);
-            var flippedStepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedB, _checker, skippedCars);
+            // Limit to a few steps for scoring — we only need to compare sides,
+            // not enumerate all 50+ cars.
+            var flippedStepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedA, _checker, skippedCars, maxSteps: 3);
+            var flippedStepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedB, _checker, skippedCars, maxSteps: 3);
             int scoreA = flippedStepsA.Count;
             int scoreB = flippedStepsB.Count;
 
