@@ -386,14 +386,19 @@ namespace Autopilot.Planning
                             if (junctionToCandidate >= trainLength)
                             {
                                 // Strategy 2: mid-branch direct — train fits between
-                                // junction and this switch. Set waypoint so the front
-                                // is far enough that the tail clears the junction.
-                                waypointDist = junctionToCandidate;
+                                // junction and this switch. Waypoint measured from the
+                                // switch: place the front so the tail just clears the
+                                // junction (front = junction - trainLength from switch).
+                                float foulingAtJunction = 2f; // small clearance past junction
+                                waypointDist = junctionToCandidate - trainLength - foulingAtJunction;
+                                if (waypointDist < candidate.FoulingNear)
+                                    waypointDist = candidate.FoulingNear;
                                 waypointLoc = Graph.Shared.LocationByMoving(atSwitch, waypointDist);
                                 waypointPos = DirectedPosition.FromLocation(waypointLoc);
                                 strategy = "MidBranchDirect";
                                 _logger.Log("LoopValidator", $"GetRepositionLocation: mid-branch via junction {junctionId}, " +
-                                    $"junctionToSwitch={junctionToCandidate:F0}m, trainLen={trainLength:F0}m — fits (Strategy 2)");
+                                    $"junctionToSwitch={junctionToCandidate:F0}m, trainLen={trainLength:F0}m, " +
+                                    $"waypointFromSwitch={waypointDist:F0}m — fits (Strategy 2)");
                             }
                             else if (junctionToOther >= trainLength)
                             {
