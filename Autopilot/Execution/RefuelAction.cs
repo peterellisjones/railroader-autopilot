@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Game.Messages;
 using Game.State;
+using Helpers;
 using KeyValue.Runtime;
 using Model;
 using Model.AI;
@@ -49,6 +51,9 @@ namespace Autopilot.Execution
 
         public string StatusMessage => _statusMessage;
 
+        /// <summary>Coupling gap between adjacent cars (from WaypointQueue).</summary>
+        private const float CouplingGap = 1.04f;
+
         public RefuelAction(FacilityInfo facility, BaseLocomotive loco, TrainService trainService)
         {
             _facility = facility;
@@ -61,7 +66,12 @@ namespace Autopilot.Execution
                 var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
                 _previousMaxSpeed = persistence.Orders.MaxSpeedMph;
 
-                trainService.SetWaypoint(loco, facility.Location);
+                // Compute precise waypoint that positions the fuel car's load slot
+                // directly under the loader, using WaypointQueue's approach.
+                var preciseLocation = ComputeLoadSlotWaypoint(loco, trainService);
+                var waypointDP = Autopilot.Model.DirectedPosition.FromLocation(preciseLocation);
+
+                trainService.SetWaypoint(loco, waypointDP);
 
                 // Override AE speed to approach speed for slow approach
                 var helper = new AutoEngineerOrdersHelper(loco, persistence);
@@ -69,6 +79,7 @@ namespace Autopilot.Execution
 
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: moving to {facility.FuelType} facility " +
                     $"at {facility.Location.Segment?.id}|{facility.Location.DistanceFromA:F1}, " +
+                    $"precise waypoint at {preciseLocation.segment?.id}|{preciseLocation.distance:F1}, " +
                     $"distance={facility.Distance:F0}m, approach speed={AutopilotConstants.RefuelApproachSpeedMph}mph");
             }
             catch (Exception ex)
@@ -76,6 +87,181 @@ namespace Autopilot.Execution
                 _initError = $"Failed to set waypoint for refuel: {ex.Message}";
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: {_initError}");
             }
+        }
+
+        /// <summary>
+        /// Compute the precise waypoint Location that will position the fuel car's
+        /// load slot directly under the loader. Ported from WaypointQueue's RefuelService.GetRefuelLocation.
+        ///
+        /// The AE waypoint targets the FRONT of the train (leading end in direction of travel).
+        /// We need to figure out where to put the front of the train so the fuel car's
+        /// load slot ends up at the loader's position.
+        /// </summary>
+        private Location ComputeLoadSlotWaypoint(BaseLocomotive loco, TrainService trainService)
+        {
+            var graph = Graph.Shared;
+            var fuelCar = trainService.GetFuelCar(loco);
+
+            // 1. Find the fuel car's load slot position in game space
+            Vector3 loadSlotPosition = GetFuelCarLoadSlotPosition(fuelCar, _facility.FuelType);
+
+            // 2. Get the loader's track location
+            Location loaderLocation = _facility.Location.ToLocation();
+
+            // 3. Get the consist's end locations (closest and furthest from the loader)
+            var consist = loco.EnumerateCoupled(Car.LogicalEnd.A).ToList();
+            var firstEndLoc = consist.First().LocationFor(Car.LogicalEnd.A);
+            var lastEndLoc = consist.Last().LocationFor(Car.LogicalEnd.B);
+
+            // Determine which train end is closer to the loader
+            float distFirst = Vector3.Distance(firstEndLoc.GetPosition().ZeroY(), loaderLocation.GetPosition().ZeroY());
+            float distLast = Vector3.Distance(lastEndLoc.GetPosition().ZeroY(), loaderLocation.GetPosition().ZeroY());
+
+            Location closestTrainEndLocation, furthestTrainEndLocation;
+            if (distFirst <= distLast)
+            {
+                closestTrainEndLocation = firstEndLoc;
+                furthestTrainEndLocation = lastEndLoc;
+            }
+            else
+            {
+                closestTrainEndLocation = lastEndLoc;
+                furthestTrainEndLocation = firstEndLoc;
+            }
+
+            // 4. Determine which end of the fuel car is furthest from the loader,
+            //    then enumerate cars from that end to calculate distances
+            Car.LogicalEnd furthestFuelCarEnd = fuelCar.ClosestLogicalEndTo(furthestTrainEndLocation, graph);
+            Car.LogicalEnd closestFuelCarEnd = furthestFuelCarEnd == Car.LogicalEnd.A
+                ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+
+            // Get cars from the fuel car toward the furthest train end (inclusive)
+            var carsTowardFurthestEnd = EnumerateAdjacentCarsTowardEnd(fuelCar, furthestFuelCarEnd);
+            float distFromFurthestEndToFuelCar = CalculateTotalLength(carsTowardFurthestEnd);
+
+            // Distance from the fuel car's closest end to its load slot
+            float distFromClosestEndToSlot = Vector3.Distance(
+                fuelCar.LocationFor(closestFuelCarEnd).GetPosition().ZeroY(),
+                loadSlotPosition.ZeroY());
+
+            float totalTrainLength = CalculateTotalLength(consist);
+
+            Loader.Mod.Logger.Log($"Autopilot RefuelAction: positioning — " +
+                $"totalTrainLen={totalTrainLength:F1}, " +
+                $"distFurthestToFuelCar={distFromFurthestEndToFuelCar:F1}, " +
+                $"distClosestEndToSlot={distFromClosestEndToSlot:F1}");
+
+            // 5. Calculate the offset using IsTargetBetween geometry checks
+            //    (same logic as WaypointQueue)
+            Location locationToMoveToward = new();
+            float distanceToMove = 0;
+
+            if (IsTargetBetween(loadSlotPosition, loaderLocation.GetPosition(), closestTrainEndLocation.GetPosition()))
+            {
+                // Slot is between loader and closest end — move toward far end
+                distanceToMove = distFromFurthestEndToFuelCar - distFromClosestEndToSlot;
+                locationToMoveToward = furthestTrainEndLocation;
+            }
+
+            if (IsTargetBetween(loadSlotPosition, loaderLocation.GetPosition(), furthestTrainEndLocation.GetPosition()))
+            {
+                // Slot is between loader and furthest end — move toward near end
+                distanceToMove = totalTrainLength - distFromFurthestEndToFuelCar + distFromClosestEndToSlot;
+                locationToMoveToward = closestTrainEndLocation;
+            }
+
+            if (IsTargetBetween(loaderLocation.GetPosition(), closestTrainEndLocation.GetPosition(), furthestTrainEndLocation.GetPosition()))
+            {
+                // Loader is between the two train ends — negate
+                distanceToMove = -distanceToMove;
+            }
+
+            Loader.Mod.Logger.Log($"Autopilot RefuelAction: computed offset={distanceToMove:F2}m");
+
+            // 6. Apply offset: orient the loader location toward the direction we want to move,
+            //    then move by the computed distance
+            Location oriented = graph.LocationOrientedToward(loaderLocation, locationToMoveToward);
+            Location result = graph.LocationByMoving(oriented, distanceToMove, true, true);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Get the game-space position of the fuel car's load slot for the given fuel type.
+        /// Ported from WaypointQueue's GetFuelCarLoadSlotPosition + CalculatePositionFromLoadTarget.
+        /// </summary>
+        private static Vector3 GetFuelCarLoadSlotPosition(Car fuelCar, string fuelType)
+        {
+            var loadSlot = fuelCar.Definition.LoadSlots.Find(slot => slot.RequiredLoadIdentifier == fuelType);
+            if (loadSlot == null)
+                throw new InvalidOperationException($"Fuel car {fuelCar.DisplayName} has no load slot for '{fuelType}'");
+
+            int slotIndex = fuelCar.Definition.LoadSlots.IndexOf(loadSlot);
+            var carLoadTargets = fuelCar.GetComponentsInChildren<CarLoadTarget>().ToList();
+            var loadTarget = carLoadTargets.Find(clt => clt.slotIndex == slotIndex);
+            if (loadTarget == null)
+                throw new InvalidOperationException($"Fuel car {fuelCar.DisplayName} has no CarLoadTarget for slot index {slotIndex}");
+
+            // Convert load target's local position to game space using the car's transform matrix
+            // (same logic as CarLoadTargetLoader.LoadSlotFromCar)
+            Matrix4x4 transformMatrix = fuelCar.GetTransformMatrix(Graph.Shared);
+            Vector3 localPoint = fuelCar.transform.InverseTransformPoint(loadTarget.transform.position);
+            Vector3 gamePosition = transformMatrix.MultiplyPoint3x4(localPoint);
+            return gamePosition;
+        }
+
+        /// <summary>
+        /// Check if a target point lies between two other points in XZ space.
+        /// If the target is in the middle, its distance to either endpoint is less than
+        /// the distance between the endpoints.
+        /// Ported from WaypointQueue's IsTargetBetween.
+        /// </summary>
+        private static bool IsTargetBetween(Vector3 target, Vector3 positionA, Vector3 positionB)
+        {
+            float distAToTarget = Vector3.Distance(positionA.ZeroY(), target.ZeroY());
+            float distBToTarget = Vector3.Distance(positionB.ZeroY(), target.ZeroY());
+            float distAToB = Vector3.Distance(positionA.ZeroY(), positionB.ZeroY());
+            return distAToTarget < distAToB && distBToTarget < distAToB;
+        }
+
+        /// <summary>
+        /// Calculate total length of a list of cars including coupling gaps.
+        /// Uses CouplingGap (1.04f) per coupling, matching WaypointQueue's CalculateTotalLength.
+        /// </summary>
+        private static float CalculateTotalLength(List<Car> cars)
+        {
+            float length = 0f;
+            foreach (var car in cars)
+                length += car.carLength;
+            return length + CouplingGap * (cars.Count - 1);
+        }
+
+        /// <summary>
+        /// Enumerate cars from a starting car toward a specific logical end, inclusive.
+        /// Returns the starting car plus all cars coupled in that direction.
+        /// Ported from WaypointQueue's carService.EnumerateAdjacentCarsTowardEnd.
+        /// </summary>
+        private static List<Car> EnumerateAdjacentCarsTowardEnd(Car startCar, Car.LogicalEnd towardEnd)
+        {
+            var result = new List<Car>();
+            var current = startCar;
+            var currentEnd = towardEnd;
+
+            while (current != null)
+            {
+                result.Add(current);
+                var next = current.CoupledTo(currentEnd);
+                if (next == null)
+                    break;
+                // Figure out which end of the next car connects back to current
+                var nextEndBack = next.CoupledTo(Car.LogicalEnd.A) == current
+                    ? Car.LogicalEnd.A : Car.LogicalEnd.B;
+                // Continue toward the opposite end of the next car
+                currentEnd = nextEndBack == Car.LogicalEnd.A ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+                current = next;
+            }
+
+            return result;
         }
 
         public ActionOutcome Tick(BaseLocomotive loco, TrainService trainService)
@@ -132,53 +318,8 @@ namespace Autopilot.Execution
             if (!trainService.IsStoppedForDuration(loco, 1.0f))
                 return new InProgress();
 
-            // Check if fuel car needs a nudge to align with the loader
-            var fuelCar = trainService.GetFuelCar(loco);
-            var loaderLoc = _facility.Location.ToLocation();
-            var graph = Graph.Shared;
-
-            bool foundF = graph.TryFindDistance(fuelCar.LocationF, loaderLoc, out float distF, out _);
-            bool foundR = graph.TryFindDistance(fuelCar.LocationR, loaderLoc, out float distR, out _);
-
-            if (!foundF && !foundR)
-            {
-                // Can't determine distance — assume close enough, proceed to refuel
-                Loader.Mod.Logger.Log($"Autopilot RefuelAction: TryFindDistance failed for both ends " +
-                    $"of fuel car {fuelCar.DisplayName}, assuming close enough");
-                return TransitionToRefueling(loco, trainService);
-            }
-
-            // Compute distance from the fuel car's CENTER to the loader.
-            // Using (distF + distR) / 2 centers the car on the loader,
-            // rather than just bringing the nearest end close.
-            float centerDist;
-            if (foundF && foundR)
-                centerDist = (distF + distR) / 2f;
-            else if (foundF)
-                centerDist = distF;
-            else
-                centerDist = distR;
-
-            Loader.Mod.Logger.Log($"Autopilot RefuelAction: fuel car {fuelCar.DisplayName} " +
-                $"distance to loader: F={distF:F1}m(found={foundF}) R={distR:F1}m(found={foundR}) center={centerDist:F1}m");
-
-            if (centerDist > 2f)
-            {
-                // Nudge the train to center the fuel car on the loader.
-                // Direction: the fuel car's closer end tells us which way to move.
-                bool goForward = foundF && (!foundR || distF < distR);
-
-                Loader.Mod.Logger.Log($"Autopilot RefuelAction: nudging {centerDist:F1}m " +
-                    $"(forward={goForward}) to center fuel car on loader");
-
-                _statusMessage = $"Positioning for {_facility.FuelType}...";
-                trainService.MoveDistance(loco, centerDist, goForward);
-                _phase = Phase.Positioning;
-                _statusTimer = 0f;
-                return new InProgress();
-            }
-
-            // Already close enough — activate loader directly
+            // The precise waypoint computed in the constructor should have positioned
+            // the fuel car's load slot directly at the loader. Go straight to refueling.
             return TransitionToRefueling(loco, trainService);
         }
 
