@@ -2,7 +2,7 @@
     "Id": "Autopilot",
     "DisplayName": "Autopilot",
     "Author": "peterellisjones",
-    "Version": "0.6.0",
+    "Version": "0.7.0",
     "ManagerVersion": "0.31.0",
     "AssemblyName": "Autopilot.dll",
     "EntryMethod": "Autopilot.Loader.Load"

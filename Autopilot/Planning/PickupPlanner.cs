@@ -131,11 +131,41 @@ namespace Autopilot.Planning
             var candidates = new List<(PickupTarget target, float distance)>();
             var processedChains = new HashSet<string>();
 
+            // Build segment→cars map for blocking checks.
+            // RouteSearch ignores coupled groups (only uncoupled cars are obstacles),
+            // so we must independently check route segments for any non-target cars.
+            var segmentToCars = new Dictionary<string, List<Car>>();
+            foreach (var car in nearbyCars)
+            {
+                var segA = car.LocationA.segment;
+                var segB = car.LocationB.segment;
+                if (segA != null)
+                {
+                    if (!segmentToCars.TryGetValue(segA.id, out var listA))
+                    {
+                        listA = new List<Car>();
+                        segmentToCars[segA.id] = listA;
+                    }
+                    listA.Add(car);
+                }
+                if (segB != null && segB != segA)
+                {
+                    if (!segmentToCars.TryGetValue(segB.id, out var listB))
+                    {
+                        listB = new List<Car>();
+                        segmentToCars[segB.id] = listB;
+                    }
+                    listB.Add(car);
+                }
+            }
+
             foreach (var carId in matchingCarIds)
             {
                 var car = matchingCars[carId];
                 var wrapped = (ICar)new CarAdapter(car);
                 var chain = GetCoupledChain(wrapped);
+                var chainIds = new HashSet<string>();
+                foreach (var c in chain) chainIds.Add(c.id);
 
                 var chainKey = chain[0].id;
                 if (processedChains.Contains(chainKey))
@@ -220,6 +250,74 @@ namespace Autopilot.Planning
                             trainMomentum: 0f, maxIterations: 5000,
                             checkForCarsIgnored: ignored,
                             checkForCarsImpasse: impasse);
+                        // RouteSearch with checkForCars only detects uncoupled
+                        // cars; coupled groups are invisible. Check the actual
+                        // route segments for any non-target car that would block.
+                        if (routeFound)
+                        {
+                            var routeSegs = ReversalCounter.DeduplicateSegments(routeSteps);
+                            var terminalSegId = testLoc.segment?.id;
+
+                            // Determine approach direction on the terminal segment
+                            // from the couple point vs target car center.
+                            // The couple point is offset past the car's free end
+                            // in the approach direction, so cpDist < carCenter
+                            // means approach from End.A (low distance).
+                            bool? approachFromEndA = null;
+                            if (terminalSegId != null && coupleTarget.LocationA.segment?.id == terminalSegId
+                                && coupleTarget.LocationB.segment?.id == terminalSegId)
+                            {
+                                float carCenter = (coupleTarget.LocationA.distance + coupleTarget.LocationB.distance) / 2f;
+                                approachFromEndA = testLoc.distance < carCenter;
+                            }
+
+                            foreach (var seg in routeSegs)
+                            {
+                                if (segmentToCars.TryGetValue(seg.id, out var carsOnSeg))
+                                {
+                                    foreach (var blockCar in carsOnSeg)
+                                    {
+                                        if (chainIds.Contains(blockCar.id))
+                                            continue;
+
+                                        // On the terminal segment, only block if the car
+                                        // is between the approach end and the couple point.
+                                        if (seg.id == terminalSegId && approachFromEndA.HasValue)
+                                        {
+                                            float cpDist = testLoc.distance;
+                                            float carMinDist = float.MaxValue;
+                                            float carMaxDist = float.MinValue;
+                                            if (blockCar.LocationA.segment?.id == seg.id)
+                                            {
+                                                carMinDist = blockCar.LocationA.distance;
+                                                carMaxDist = blockCar.LocationA.distance;
+                                            }
+                                            if (blockCar.LocationB.segment?.id == seg.id)
+                                            {
+                                                carMinDist = System.Math.Min(carMinDist, blockCar.LocationB.distance);
+                                                carMaxDist = System.Math.Max(carMaxDist, blockCar.LocationB.distance);
+                                            }
+                                            if (carMinDist == float.MaxValue)
+                                                continue; // car not actually on this segment
+
+                                            // Approach from End.A: route covers [0, cpDist].
+                                            // Approach from End.B: route covers [cpDist, segLen].
+                                            bool inPath = approachFromEndA.Value
+                                                ? carMinDist < cpDist
+                                                : carMaxDist > cpDist;
+
+                                            if (!inPath)
+                                                continue;
+                                        }
+
+                                        Log($"  Route to {target.DisplayName} blocked by {blockCar.DisplayName} on {seg.id}");
+                                        routeFound = false;
+                                        break;
+                                    }
+                                }
+                                if (!routeFound) break;
+                            }
+                        }
                         if (routeFound && routeMetrics.Distance < routeDist)
                             routeDist = routeMetrics.Distance;
                     }

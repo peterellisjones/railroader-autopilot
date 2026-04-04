@@ -10,7 +10,7 @@ A mod for [Railroader](https://store.steampowered.com/app/1689160/Railroader/) t
 - **Loop detection** — finds the nearest passing siding or wye that fits the train for runarounds
 - **Train splitting** — when the train is too long for a siding, splits the train, delivers what it can, then returns to recouple the rest
 - **Smart repositioning** — moves to the nearest loop when a runaround is needed but no loop is available from the current position
-- **Pickup mode** — collect cars from nearby sidings and couple them to your train, filtered by destination
+- **Pickup mode** — collect cars from nearby sidings and couple them to your train, filtered by destination; skips cars blocked by other rolling stock
 - **Auto-refuel** — monitors fuel/water levels and automatically routes to the nearest facility when low (steam and diesel)
 - **Parking space** — save a waypoint as a locomotive's "parking space" and return to it with one click
 - **Park after delivery** — optionally send the loco to its parking space automatically when deliveries finish
