@@ -11,6 +11,7 @@ A mod for [Railroader](https://store.steampowered.com/app/1689160/Railroader/) t
 - **Train splitting** — when the train is too long for a siding, splits the train, delivers what it can, then returns to recouple the rest
 - **Smart repositioning** — moves to the nearest loop when a runaround is needed but no loop is available from the current position
 - **Pickup mode** — collect cars from nearby sidings and couple them to your train, filtered by destination
+- **Auto-refuel** — monitors fuel/water levels and automatically routes to the nearest facility when low (steam and diesel)
 - **Parking space** — save a waypoint as a locomotive's "parking space" and return to it with one click
 - **Park after delivery** — optionally send the loco to its parking space automatically when deliveries finish
 - **Jump to waypoint** — button in the UI to jump the camera to the current waypoint
@@ -47,6 +48,21 @@ The autopilot will:
 
 The autopilot will drive to each car, couple it, and continue until all reachable cars for that destination are collected.
 
+### Auto-Refuel
+
+The autopilot can automatically refuel and rewater locomotives when their levels get low.
+
+- **Per-locomotive toggle** — enable/disable with the **Refuel when low** checkbox in the Autopilot window
+- **Two thresholds** — configurable in UMM settings:
+  - *Mid-run* (default 20%) — checks after each delivery/pickup, only interrupts when fuel is genuinely low
+  - *Completion* (default 50%) — checks after all work is done before parking, more aggressive since the loco is idle anyway
+- **Refuel Now button** — immediately route to the nearest facility regardless of thresholds
+- **Steam locos** — handles water and coal separately, prioritizes water (runs out faster), prefers water towers near coal loaders to minimize travel
+- **Diesel locos** — routes to the nearest diesel fuel facility
+- **Opportunistic refueling** — after refueling one type, if the other type's facility is within 100m and below 90%, tops up automatically
+
+Set either threshold to 0% to disable automatic refueling for that check point.
+
 ### Parking Space
 
 Save a location so you can send a locomotive back there later:
@@ -66,6 +82,7 @@ The parking space is saved per-locomotive and persists across save/load. Enable 
 | **Stop** | Pause the autopilot (can resume later) |
 | **Retry** | Retry after an error |
 | **Jump to WP** | Jump camera to the current waypoint |
+| **Refuel Now** | Route to nearest fuel facility and refuel immediately |
 | **Set Park** | Save the current waypoint as a parking space |
 | **Park** | Send the loco to its saved parking space |
 
@@ -80,6 +97,8 @@ The UI shows what the autopilot is doing and why:
 - **Returning to recouple dropped cars...** — picking up previously dropped cars
 - **Moving to pick up PRR 34826...** — driving to a car for pickup
 - **Collecting cars for: Sylva Building Supply** — pickup mode active
+- **Moving to water tower...** — routing to a fuel facility
+- **Refueling water (65%)...** — filling up at a facility
 
 ## How It Works
 
