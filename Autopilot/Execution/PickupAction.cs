@@ -59,12 +59,13 @@ namespace Autopilot.Execution
                     bool wpSatisfied = trainService.IsWaypointSatisfied(loco);
                     bool wpMode = trainService.IsWaypointMode(loco);
 
-                    // Check for AE planner errors
+                    // Check for AE planner errors — only skip the couple
+                    // target so the chain can be retried from its other end.
                     if (status.Contains("blocked") || status.Contains("Blocked")
                         || status.Contains("End of Track") || status.Contains("too long"))
                     {
-                        Loader.Mod.Logger.Log($"Autopilot Pickup: can't reach {_target.CoupleTarget.DisplayName}: {status} — skipping");
-                        return new ActionReplan(_target.TargetCars);
+                        Loader.Mod.Logger.Log($"Autopilot Pickup: can't reach {_target.CoupleTarget.DisplayName}: {status} — skipping approach");
+                        return new ActionReplan(new List<Car> { _target.CoupleTarget });
                     }
 
                     // If the AE isn't moving toward the car, skip this
