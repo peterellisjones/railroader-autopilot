@@ -65,6 +65,10 @@
       <HintPath>$(RrManagedDir)\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(RrManagedDir)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(RrManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>

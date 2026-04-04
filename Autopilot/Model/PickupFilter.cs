@@ -64,10 +64,10 @@ namespace Autopilot.Model
 
     public class PickupFilter
     {
-        public FilterAxis From { get; }
-        public FilterAxis To { get; }
-        public float MaxDistance { get; }
-        public bool AutoAddToSwitchlist { get; }
+        public FilterAxis From { get; set; }
+        public FilterAxis To { get; set; }
+        public float MaxDistance { get; set; }
+        public bool AutoAddToSwitchlist { get; set; }
 
         public PickupFilter(FilterAxis from, FilterAxis to, float maxDistance, bool autoAddToSwitchlist)
         {

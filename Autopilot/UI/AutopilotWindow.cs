@@ -11,6 +11,7 @@ using Model;
 using Cameras;
 using Autopilot.Model;
 using Autopilot.Execution;
+using Autopilot.Planning;
 using Autopilot.Services;
 
 namespace Autopilot.UI
@@ -21,8 +22,11 @@ namespace Autopilot.UI
         private UIPanel _panel;
         private bool _isOpen;
         private AutopilotMode _selectedMode = AutopilotMode.Delivery;
-        private int _selectedDestinationIndex = -1;
-        private List<string> _destinations = new List<string>();
+        private PickupFilter _pickupFilter = PickupFilter.Default;
+        private List<string> _fromOptions = new List<string>();
+        private List<string> _toOptions = new List<string>();
+        private PickupPlanner? _pickupPlanner;
+        private int _eligibleCarCount;
         private bool _deliverAfterPickup = false;
 
         // Event-driven rebuild tracking
@@ -146,6 +150,44 @@ namespace Autopilot.UI
             RebuildPanel();
         }
 
+        private void RefreshPickupOptions(BaseLocomotive loco)
+        {
+            if (_pickupPlanner == null)
+                _pickupPlanner = new PickupPlanner(TrainSvc);
+
+            if (_pickupFilter.From.Mode != Autopilot.Model.FilterMode.Any && _pickupFilter.From.Mode != Autopilot.Model.FilterMode.Switchlist)
+                _fromOptions = _pickupPlanner.GetFromOptions(loco, _pickupFilter);
+            else
+                _fromOptions.Clear();
+
+            if (_pickupFilter.To.Mode != Autopilot.Model.FilterMode.Any && _pickupFilter.To.Mode != Autopilot.Model.FilterMode.Switchlist)
+                _toOptions = _pickupPlanner.GetToOptions(loco, _pickupFilter);
+            else
+                _toOptions.Clear();
+
+            _pickupFilter.From.CheckedItems.IntersectWith(_fromOptions);
+            _pickupFilter.To.CheckedItems.IntersectWith(_toOptions);
+
+            _eligibleCarCount = _pickupPlanner.GetEligibleCars(loco, _pickupFilter).Count;
+        }
+
+        private List<string> GetFilterModeLabels()
+        {
+            string switchlistLabel = "On switchlist";
+            var crewName = TrainSvc.GetTrainCrewName();
+            if (!string.IsNullOrEmpty(crewName))
+                switchlistLabel = $"On switchlist ({crewName})";
+
+            return new List<string>
+            {
+                "Any",
+                "Area",
+                "Industry",
+                "Destination",
+                switchlistLabel
+            };
+        }
+
         private void CreateWindow()
         {
             var creator = UnityEngine.Object.FindObjectOfType<ProgrammaticWindowCreator>();
@@ -258,7 +300,7 @@ namespace Autopilot.UI
                 {
                     strip.AddButtonSelectable("Delivery",
                         _selectedMode == AutopilotMode.Delivery,
-                        () => { _selectedMode = AutopilotMode.Delivery; _selectedDestinationIndex = -1; RebuildPanel(); });
+                        () => { _selectedMode = AutopilotMode.Delivery; RebuildPanel(); });
                     strip.AddButtonSelectable("Pickup",
                         _selectedMode == AutopilotMode.Pickup,
                         () =>
@@ -266,8 +308,8 @@ namespace Autopilot.UI
                             if (_selectedMode != AutopilotMode.Pickup)
                             {
                                 _selectedMode = AutopilotMode.Pickup;
-                                _destinations = new List<string>(); // TODO: Task 8 will replace with filter panel
-                                _selectedDestinationIndex = _destinations.Count > 0 ? 0 : -1;
+                                _pickupFilter = PickupFilter.Default;
+                                RefreshPickupOptions(loco);
                                 RebuildPanel();
                             }
                         });
@@ -275,23 +317,107 @@ namespace Autopilot.UI
 
                 if (_selectedMode == AutopilotMode.Pickup)
                 {
-                    if (_destinations.Count == 0)
+                    var loco2 = loco; // capture for lambdas
+
+                    // Distance slider
+                    float sliderMax = 10000f;
+                    float sliderVal = _pickupFilter.MaxDistance >= sliderMax ? sliderMax : _pickupFilter.MaxDistance;
+                    string distLabel = _pickupFilter.MaxDistance >= sliderMax ? "\u221E" : $"{(_pickupFilter.MaxDistance / 1000f):F1} km";
+                    builder.AddSlider(() => sliderVal, () => distLabel, (val) =>
                     {
-                        builder.AddLabel("<color=yellow>No reachable cars with waybills found.</color>");
-                    }
+                        _pickupFilter.MaxDistance = val >= sliderMax ? float.MaxValue : val;
+                        RefreshPickupOptions(loco2);
+                        RebuildPanel();
+                    }, 0f, sliderMax);
+
+                    // From/To columns side by side
+                    var filterModeLabels = GetFilterModeLabels();
+
+                    builder.HStack(hstack =>
+                    {
+                        // FROM column
+                        hstack.VStack(fromCol =>
+                        {
+                            fromCol.AddLabel("<b>From</b>");
+                            int fromIdx = (int)_pickupFilter.From.Mode;
+                            fromCol.AddDropdown(filterModeLabels, fromIdx, (idx) =>
+                            {
+                                _pickupFilter.From = new FilterAxis((Autopilot.Model.FilterMode)idx, new HashSet<string>());
+                                RefreshPickupOptions(loco2);
+                                RebuildPanel();
+                            });
+
+                            if (_pickupFilter.From.Mode != Autopilot.Model.FilterMode.Any && _pickupFilter.From.Mode != Autopilot.Model.FilterMode.Switchlist)
+                            {
+                                foreach (var option in _fromOptions)
+                                {
+                                    var opt = option;
+                                    fromCol.AddFieldToggle(opt,
+                                        () => _pickupFilter.From.CheckedItems.Contains(opt),
+                                        (val) =>
+                                        {
+                                            if (val)
+                                                _pickupFilter.From.CheckedItems.Add(opt);
+                                            else
+                                                _pickupFilter.From.CheckedItems.Remove(opt);
+                                            RefreshPickupOptions(loco2);
+                                            RebuildPanel();
+                                        });
+                                }
+                                if (_fromOptions.Count == 0)
+                                    fromCol.AddLabel("<color=yellow>No options</color>");
+                            }
+                        });
+
+                        // TO column
+                        hstack.VStack(toCol =>
+                        {
+                            toCol.AddLabel("<b>To</b>");
+                            int toIdx = (int)_pickupFilter.To.Mode;
+                            toCol.AddDropdown(filterModeLabels, toIdx, (idx) =>
+                            {
+                                _pickupFilter.To = new FilterAxis((Autopilot.Model.FilterMode)idx, new HashSet<string>());
+                                RefreshPickupOptions(loco2);
+                                RebuildPanel();
+                            });
+
+                            if (_pickupFilter.To.Mode != Autopilot.Model.FilterMode.Any && _pickupFilter.To.Mode != Autopilot.Model.FilterMode.Switchlist)
+                            {
+                                foreach (var option in _toOptions)
+                                {
+                                    var opt = option;
+                                    toCol.AddFieldToggle(opt,
+                                        () => _pickupFilter.To.CheckedItems.Contains(opt),
+                                        (val) =>
+                                        {
+                                            if (val)
+                                                _pickupFilter.To.CheckedItems.Add(opt);
+                                            else
+                                                _pickupFilter.To.CheckedItems.Remove(opt);
+                                            RefreshPickupOptions(loco2);
+                                            RebuildPanel();
+                                        });
+                                }
+                                if (_toOptions.Count == 0)
+                                    toCol.AddLabel("<color=yellow>No options</color>");
+                            }
+                        });
+                    });
+
+                    // Auto-add to switchlist
+                    builder.AddFieldToggle("Auto-add to switchlist",
+                        () => _pickupFilter.AutoAddToSwitchlist,
+                        (val) => _pickupFilter.AutoAddToSwitchlist = val);
+
+                    builder.AddFieldToggle("Deliver after pickup",
+                        () => _deliverAfterPickup,
+                        (val) => _deliverAfterPickup = val);
+
+                    // Eligible car count
+                    if (_eligibleCarCount == 0)
+                        builder.AddLabel("<color=yellow>No cars match the current filter.</color>");
                     else
-                    {
-                        builder.AddField("Destination",
-                            builder.AddDropdown(
-                                _destinations,
-                                _selectedDestinationIndex >= 0 ? _selectedDestinationIndex : 0,
-                                (index) => { _selectedDestinationIndex = index; }
-                            )
-                        );
-                        builder.AddFieldToggle("Deliver after pickup",
-                            () => _deliverAfterPickup,
-                            (val) => _deliverAfterPickup = val);
-                    }
+                        builder.AddLabel($"{_eligibleCarCount} car(s) match filter");
                 }
             }
 
@@ -312,20 +438,13 @@ namespace Autopilot.UI
                 {
                     if (_selectedMode == AutopilotMode.Pickup)
                     {
-                        bool canStart = _destinations.Count > 0 && _selectedDestinationIndex >= 0;
-                        if (canStart)
+                        if (_eligibleCarCount > 0)
                         {
                             strip.AddButton("Start Pickup", () =>
-                                {
-                                    var dest = _destinations[_selectedDestinationIndex];
-                                    var filter = new PickupFilter(
-                                        FilterAxis.Any,
-                                        new FilterAxis(Autopilot.Model.FilterMode.Destination, new HashSet<string> { dest }),
-                                        float.MaxValue,
-                                        autoAddToSwitchlist: false);
-                                    controller.StartPickup(filter, _deliverAfterPickup);
-                                    RebuildPanel();
-                                });
+                            {
+                                controller.StartPickup(_pickupFilter, _deliverAfterPickup);
+                                RebuildPanel();
+                            });
                         }
                     }
                     else
