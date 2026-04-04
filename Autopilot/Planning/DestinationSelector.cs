@@ -179,15 +179,19 @@ namespace Autopilot.Planning
         }
 
         /// <summary>
-        /// Get available space (in meters) for the best candidate span of a destination.
-        /// Returns 0 if no candidates found.
+        /// Get the maximum available space (in meters) across all candidate spans
+        /// of a destination. Returns 0 if no candidates found.
         /// </summary>
         public float GetAvailableSpace(OpsCarPosition destination, BaseLocomotive loco)
         {
             var candidates = GetDestinationCandidates(destination, loco);
-            if (candidates.Count > 0)
-                return candidates[0].availableSpace;
-            return 0f;
+            float best = 0f;
+            foreach (var c in candidates)
+            {
+                if (c.availableSpace > best)
+                    best = c.availableSpace;
+            }
+            return best;
         }
 
         /// <summary>

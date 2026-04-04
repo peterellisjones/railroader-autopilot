@@ -46,6 +46,8 @@ namespace Autopilot.Planning
         /// Check if the loco can route to a destination with a specific train length,
         /// ignoring specific cars (e.g., only the cars that will remain attached after a split).
         /// Cars NOT in ignoredCars will be treated as blocking obstacles.
+        /// Checks from both LocationF and LocationR since RouteSearch only exits
+        /// the starting segment in one direction.
         /// </summary>
         public bool CanRouteTo(BaseLocomotive loco, DirectedPosition destination,
             float trainLength, List<Car> ignoredCars)
@@ -60,36 +62,50 @@ namespace Autopilot.Planning
                     return true;
 
                 var ignored = new System.Collections.Generic.HashSet<Car>(ignoredCars);
-                var impasse = new System.Collections.Generic.HashSet<Car>();
 
-                var routeSteps = new List<RouteSearch.Step>();
-
-                bool found = RouteSearch.FindRoute(
+                // Check from both loco ends — RouteSearch only exits the
+                // starting segment in one direction, so after a push delivery
+                // + back-away, LocationF may face away from the siding.
+                bool foundF = RouteSearch.FindRoute(
                     graph,
                     loco.LocationF,
                     destLoc,
                     heuristic,
-                    routeSteps,
-                    out RouteSearch.Metrics metrics,
+                    new List<RouteSearch.Step>(),
+                    out _,
                     checkForCars: true,
                     trainLength: trainLength,
                     trainMomentum: 0f,
                     maxIterations: 10000,
                     checkForCarsIgnored: ignored,
-                    checkForCarsImpasse: impasse,
+                    checkForCarsImpasse: new System.Collections.Generic.HashSet<Car>(),
                     limitSwitchIds: null,
                     enableLogging: false
                 );
+                if (foundF) return true;
 
-                return found;
+                bool foundR = RouteSearch.FindRoute(
+                    graph,
+                    loco.LocationR,
+                    destLoc,
+                    heuristic,
+                    new List<RouteSearch.Step>(),
+                    out _,
+                    checkForCars: true,
+                    trainLength: trainLength,
+                    trainMomentum: 0f,
+                    maxIterations: 10000,
+                    checkForCarsIgnored: ignored,
+                    checkForCarsImpasse: new System.Collections.Generic.HashSet<Car>(),
+                    limitSwitchIds: null,
+                    enableLogging: false
+                );
+                return foundR;
             }
             catch (System.Exception ex)
             {
                 _logger.Log("RouteChecker", $"CanRouteTo: exception {ex.GetType().Name}: {ex.Message}");
                 _logger.Log("RouteChecker", $"CanRouteTo: stack: {ex.StackTrace}");
-                // Route search crashed — if the loco is on or adjacent to the
-                // destination segment, assume reachable (already there). Otherwise
-                // treat as unreachable.
                 bool nearDest = loco.LocationF.segment == destination.Segment
                              || loco.LocationR.segment == destination.Segment;
                 _logger.Log("RouteChecker", $"CanRouteTo: fallback nearDest={nearDest}");
@@ -100,12 +116,12 @@ namespace Autopilot.Planning
         /// <summary>
         /// Like CanRouteTo, but also returns the route steps for safety checking.
         /// Returns (found, routeSteps). If not found, routeSteps is empty.
+        /// Checks from both LocationF and LocationR.
         /// </summary>
         public (bool found, List<RouteSearch.Step> steps) CanRouteToWithSteps(
             BaseLocomotive loco, DirectedPosition destination,
             float trainLength, List<Car> ignoredCars)
         {
-            var steps = new List<RouteSearch.Step>();
             try
             {
                 var graph = Graph.Shared;
@@ -113,36 +129,58 @@ namespace Autopilot.Planning
                 var destLoc = destination.ToLocation();
 
                 if (destLoc.segment == null || loco.LocationF.segment == null)
-                    return (true, steps);
+                    return (true, new List<RouteSearch.Step>());
 
                 var ignored = new System.Collections.Generic.HashSet<Car>(ignoredCars);
-                var impasse = new System.Collections.Generic.HashSet<Car>();
 
-                bool found = RouteSearch.FindRoute(
+                var stepsF = new List<RouteSearch.Step>();
+                bool foundF = RouteSearch.FindRoute(
                     graph,
                     loco.LocationF,
                     destLoc,
                     heuristic,
-                    steps,
-                    out RouteSearch.Metrics metrics,
+                    stepsF,
+                    out RouteSearch.Metrics metricsF,
                     checkForCars: true,
                     trainLength: trainLength,
                     trainMomentum: 0f,
                     maxIterations: 10000,
                     checkForCarsIgnored: ignored,
-                    checkForCarsImpasse: impasse,
+                    checkForCarsImpasse: new System.Collections.Generic.HashSet<Car>(),
                     limitSwitchIds: null,
                     enableLogging: false
                 );
 
-                return (found, steps);
+                var stepsR = new List<RouteSearch.Step>();
+                bool foundR = RouteSearch.FindRoute(
+                    graph,
+                    loco.LocationR,
+                    destLoc,
+                    heuristic,
+                    stepsR,
+                    out RouteSearch.Metrics metricsR,
+                    checkForCars: true,
+                    trainLength: trainLength,
+                    trainMomentum: 0f,
+                    maxIterations: 10000,
+                    checkForCarsIgnored: ignored,
+                    checkForCarsImpasse: new System.Collections.Generic.HashSet<Car>(),
+                    limitSwitchIds: null,
+                    enableLogging: false
+                );
+
+                if (foundF && foundR)
+                    return metricsF.Distance <= metricsR.Distance ? (true, stepsF) : (true, stepsR);
+                if (foundF) return (true, stepsF);
+                if (foundR) return (true, stepsR);
+                return (false, new List<RouteSearch.Step>());
             }
             catch (System.Exception ex)
             {
                 _logger.Log("RouteChecker", $"CanRouteToWithSteps: exception {ex.GetType().Name}: {ex.Message}");
                 bool nearDest = loco.LocationF.segment == destination.Segment
                              || loco.LocationR.segment == destination.Segment;
-                return (nearDest, steps);
+                return (nearDest, new List<RouteSearch.Step>());
             }
         }
 

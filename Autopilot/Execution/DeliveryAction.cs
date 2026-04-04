@@ -23,6 +23,8 @@ namespace Autopilot.Execution
         private string _statusMessage;
         private string _initError;
         private List<Car> _completedCars;
+        private bool _coupleVerified;
+        private bool _coupleRetried;
 
         public string StatusMessage => _statusMessage;
 
@@ -37,12 +39,25 @@ namespace Autopilot.Execution
             if (step.CoupleTarget != null)
             {
                 // Couple to existing car on the span. Use the free (uncoupled)
-                // end — that's the end facing the approach. Don't use
-                // ClosestLogicalEndTo (crow-flies) which can pick the wrong end.
+                // end — that's the end facing the approach. For a lone car
+                // (both ends free), pick the end closer to the loco by graph
+                // distance — LogicalEnd.A is arbitrary and may face the buffer.
                 var graph = Graph.Shared;
                 var target = step.CoupleTarget;
-                var nearEnd = target.CoupledTo(Car.LogicalEnd.A) != null
-                    ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+                bool aFree = target.CoupledTo(Car.LogicalEnd.A) == null;
+                bool bFree = target.CoupledTo(Car.LogicalEnd.B) == null;
+                Car.LogicalEnd nearEnd;
+                if (aFree && bFree)
+                {
+                    float dA = LocoDistanceTo(graph, loco, target.LocationA);
+                    float dB = LocoDistanceTo(graph, loco, target.LocationB);
+                    nearEnd = dA <= dB ? Car.LogicalEnd.A : Car.LogicalEnd.B;
+                    Loader.Mod.Logger.Log($"Autopilot DeliveryAction: lone couple target, dA={dA:F1} dB={dB:F1} → end {nearEnd}");
+                }
+                else
+                {
+                    nearEnd = aFree ? Car.LogicalEnd.A : Car.LogicalEnd.B;
+                }
                 var coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
                     new CarAdapter(target), nearEnd, graph);
                 var coupleLocStr = Graph.Shared.LocationToString(coupleLoc.ToLocation());
@@ -107,6 +122,37 @@ namespace Autopilot.Execution
         {
             if (!trainService.IsStoppedForDuration(loco, 1.0f))
                 return new InProgress();
+
+            // If a couple target was set, verify coupling actually happened.
+            // The AE waypoint can be satisfied before physical coupling occurs
+            // (same pattern as PickupAction's explicit coupling check).
+            if (_step.CoupleTarget != null && !_coupleVerified)
+            {
+                var consist = trainService.GetCoupled(loco);
+                if (consist.Contains(_step.CoupleTarget))
+                {
+                    Loader.Mod.Logger.Log("Autopilot DeliveryAction: couple target verified in consist.");
+                    _coupleVerified = true;
+                }
+                else if (!_coupleRetried)
+                {
+                    // Coupling didn't trigger — nudge toward the target to
+                    // make physical contact and trigger auto-coupling.
+                    _coupleRetried = true;
+                    var graph = Track.Graph.Shared;
+                    graph.TryFindDistance(loco.LocationF, _step.CoupleTarget.LocationA, out float dF, out _);
+                    graph.TryFindDistance(loco.LocationR, _step.CoupleTarget.LocationA, out float dR, out _);
+                    bool pushForward = dF < dR;
+                    Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling not detected, nudging {(pushForward ? "forward" : "backward")}...");
+                    trainService.MoveDistance(loco, 2f, pushForward);
+                    return new InProgress();
+                }
+                else
+                {
+                    Loader.Mod.Logger.Log("Autopilot DeliveryAction: coupling retry failed — delivering uncoupled.");
+                    _coupleVerified = true;
+                }
+            }
 
             _statusMessage = $"Uncoupling {_step.Cars.Count} car(s)...";
             return PerformUncouple(loco, trainService);
@@ -182,6 +228,21 @@ namespace Autopilot.Execution
                 return new ActionReplan();
             }
             return new InProgress();
+        }
+
+        /// <summary>
+        /// Shortest graph distance from either loco end to a target location.
+        /// Checks both LocationF and LocationR since RouteSearch only exits
+        /// the starting segment in one direction.
+        /// </summary>
+        private static float LocoDistanceTo(Graph graph, BaseLocomotive loco, Location target)
+        {
+            float best = float.MaxValue;
+            if (graph.TryFindDistance(loco.LocationF, target, out float dF, out _))
+                best = System.Math.Min(best, dF);
+            if (graph.TryFindDistance(loco.LocationR, target, out float dR, out _))
+                best = System.Math.Min(best, dR);
+            return best;
         }
 
         /// <summary>
