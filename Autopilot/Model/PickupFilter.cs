@@ -46,6 +46,8 @@ namespace Autopilot.Model
                     return "Any";
 
                 // Named-item modes (Area, Industry, Destination)
+                if (CheckedItems.Count == 0)
+                    return Mode.ToString();
                 if (CheckedItems.Count <= 2)
                     return string.Join(", ", CheckedItems);
 

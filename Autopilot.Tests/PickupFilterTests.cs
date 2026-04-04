@@ -134,6 +134,15 @@ namespace Autopilot.Tests
                 $"Unexpected summary: {summary}");
         }
 
+        [Test]
+        public void DisplaySummary_no_checked_items_shows_mode_name()
+        {
+            var from = new FilterAxis(FilterMode.Area, new HashSet<string>());
+            var filter = new PickupFilter(from, FilterAxis.Any, float.MaxValue, false);
+
+            Assert.AreEqual("From: Area → To: Any", filter.DisplaySummary);
+        }
+
         // ── MatchesFilter ────────────────────────────────────────────────────────
 
         [Test]

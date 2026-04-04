@@ -188,6 +188,108 @@ namespace Autopilot.UI
             };
         }
 
+        private void BuildPickupFilterUI(UIPanelBuilder builder, BaseLocomotive loco, PickupFilter filter)
+        {
+            var loco2 = loco; // capture for lambdas
+
+            // Distance slider
+            float sliderMax = 10000f;
+            float sliderVal = filter.MaxDistance >= sliderMax ? sliderMax : filter.MaxDistance;
+            string distLabel = filter.MaxDistance >= sliderMax ? "\u221E" : $"{(filter.MaxDistance / 1000f):F1} km";
+            builder.AddSlider(() => sliderVal, () => distLabel, (val) =>
+            {
+                filter.MaxDistance = val >= sliderMax ? float.MaxValue : val;
+                RefreshPickupOptions(loco2);
+                RebuildPanel();
+            }, 0f, sliderMax);
+
+            // From/To columns side by side
+            var filterModeLabels = GetFilterModeLabels();
+
+            builder.HStack(hstack =>
+            {
+                // FROM column
+                hstack.VStack(fromCol =>
+                {
+                    fromCol.AddLabel("<b>From</b>");
+                    int fromIdx = (int)filter.From.Mode;
+                    fromCol.AddDropdown(filterModeLabels, fromIdx, (idx) =>
+                    {
+                        filter.From = new FilterAxis((Autopilot.Model.FilterMode)idx, new HashSet<string>());
+                        RefreshPickupOptions(loco2);
+                        RebuildPanel();
+                    });
+
+                    if (filter.From.Mode != Autopilot.Model.FilterMode.Any && filter.From.Mode != Autopilot.Model.FilterMode.Switchlist)
+                    {
+                        foreach (var option in _fromOptions)
+                        {
+                            var opt = option;
+                            fromCol.AddFieldToggle(opt,
+                                () => filter.From.CheckedItems.Contains(opt),
+                                (val) =>
+                                {
+                                    if (val)
+                                        filter.From.CheckedItems.Add(opt);
+                                    else
+                                        filter.From.CheckedItems.Remove(opt);
+                                    RefreshPickupOptions(loco2);
+                                    RebuildPanel();
+                                });
+                        }
+                        if (_fromOptions.Count == 0)
+                            fromCol.AddLabel("<color=yellow>No options</color>");
+                    }
+                });
+
+                // TO column
+                hstack.VStack(toCol =>
+                {
+                    toCol.AddLabel("<b>To</b>");
+                    int toIdx = (int)filter.To.Mode;
+                    toCol.AddDropdown(filterModeLabels, toIdx, (idx) =>
+                    {
+                        filter.To = new FilterAxis((Autopilot.Model.FilterMode)idx, new HashSet<string>());
+                        RefreshPickupOptions(loco2);
+                        RebuildPanel();
+                    });
+
+                    if (filter.To.Mode != Autopilot.Model.FilterMode.Any && filter.To.Mode != Autopilot.Model.FilterMode.Switchlist)
+                    {
+                        foreach (var option in _toOptions)
+                        {
+                            var opt = option;
+                            toCol.AddFieldToggle(opt,
+                                () => filter.To.CheckedItems.Contains(opt),
+                                (val) =>
+                                {
+                                    if (val)
+                                        filter.To.CheckedItems.Add(opt);
+                                    else
+                                        filter.To.CheckedItems.Remove(opt);
+                                    RefreshPickupOptions(loco2);
+                                    RebuildPanel();
+                                });
+                        }
+                        if (_toOptions.Count == 0)
+                            toCol.AddLabel("<color=yellow>No options</color>");
+                    }
+                });
+            });
+
+            // Auto-add to switchlist
+            builder.AddFieldToggle("Auto-add to switchlist",
+                () => filter.AutoAddToSwitchlist,
+                (val) => filter.AutoAddToSwitchlist = val);
+
+            // Eligible car count
+            RefreshPickupOptions(loco);
+            if (_eligibleCarCount == 0)
+                builder.AddLabel("<color=yellow>No cars match the current filter.</color>");
+            else
+                builder.AddLabel($"{_eligibleCarCount} car(s) match filter");
+        }
+
         private void CreateWindow()
         {
             var creator = UnityEngine.Object.FindObjectOfType<ProgrammaticWindowCreator>();
@@ -317,113 +419,23 @@ namespace Autopilot.UI
 
                 if (_selectedMode == AutopilotMode.Pickup)
                 {
-                    var loco2 = loco; // capture for lambdas
-
-                    // Distance slider
-                    float sliderMax = 10000f;
-                    float sliderVal = _pickupFilter.MaxDistance >= sliderMax ? sliderMax : _pickupFilter.MaxDistance;
-                    string distLabel = _pickupFilter.MaxDistance >= sliderMax ? "\u221E" : $"{(_pickupFilter.MaxDistance / 1000f):F1} km";
-                    builder.AddSlider(() => sliderVal, () => distLabel, (val) =>
-                    {
-                        _pickupFilter.MaxDistance = val >= sliderMax ? float.MaxValue : val;
-                        RefreshPickupOptions(loco2);
-                        RebuildPanel();
-                    }, 0f, sliderMax);
-
-                    // From/To columns side by side
-                    var filterModeLabels = GetFilterModeLabels();
-
-                    builder.HStack(hstack =>
-                    {
-                        // FROM column
-                        hstack.VStack(fromCol =>
-                        {
-                            fromCol.AddLabel("<b>From</b>");
-                            int fromIdx = (int)_pickupFilter.From.Mode;
-                            fromCol.AddDropdown(filterModeLabels, fromIdx, (idx) =>
-                            {
-                                _pickupFilter.From = new FilterAxis((Autopilot.Model.FilterMode)idx, new HashSet<string>());
-                                RefreshPickupOptions(loco2);
-                                RebuildPanel();
-                            });
-
-                            if (_pickupFilter.From.Mode != Autopilot.Model.FilterMode.Any && _pickupFilter.From.Mode != Autopilot.Model.FilterMode.Switchlist)
-                            {
-                                foreach (var option in _fromOptions)
-                                {
-                                    var opt = option;
-                                    fromCol.AddFieldToggle(opt,
-                                        () => _pickupFilter.From.CheckedItems.Contains(opt),
-                                        (val) =>
-                                        {
-                                            if (val)
-                                                _pickupFilter.From.CheckedItems.Add(opt);
-                                            else
-                                                _pickupFilter.From.CheckedItems.Remove(opt);
-                                            RefreshPickupOptions(loco2);
-                                            RebuildPanel();
-                                        });
-                                }
-                                if (_fromOptions.Count == 0)
-                                    fromCol.AddLabel("<color=yellow>No options</color>");
-                            }
-                        });
-
-                        // TO column
-                        hstack.VStack(toCol =>
-                        {
-                            toCol.AddLabel("<b>To</b>");
-                            int toIdx = (int)_pickupFilter.To.Mode;
-                            toCol.AddDropdown(filterModeLabels, toIdx, (idx) =>
-                            {
-                                _pickupFilter.To = new FilterAxis((Autopilot.Model.FilterMode)idx, new HashSet<string>());
-                                RefreshPickupOptions(loco2);
-                                RebuildPanel();
-                            });
-
-                            if (_pickupFilter.To.Mode != Autopilot.Model.FilterMode.Any && _pickupFilter.To.Mode != Autopilot.Model.FilterMode.Switchlist)
-                            {
-                                foreach (var option in _toOptions)
-                                {
-                                    var opt = option;
-                                    toCol.AddFieldToggle(opt,
-                                        () => _pickupFilter.To.CheckedItems.Contains(opt),
-                                        (val) =>
-                                        {
-                                            if (val)
-                                                _pickupFilter.To.CheckedItems.Add(opt);
-                                            else
-                                                _pickupFilter.To.CheckedItems.Remove(opt);
-                                            RefreshPickupOptions(loco2);
-                                            RebuildPanel();
-                                        });
-                                }
-                                if (_toOptions.Count == 0)
-                                    toCol.AddLabel("<color=yellow>No options</color>");
-                            }
-                        });
-                    });
-
-                    // Auto-add to switchlist
-                    builder.AddFieldToggle("Auto-add to switchlist",
-                        () => _pickupFilter.AutoAddToSwitchlist,
-                        (val) => _pickupFilter.AutoAddToSwitchlist = val);
+                    BuildPickupFilterUI(builder, loco, _pickupFilter);
 
                     builder.AddFieldToggle("Deliver after pickup",
                         () => _deliverAfterPickup,
                         (val) => _deliverAfterPickup = val);
-
-                    // Eligible car count
-                    if (_eligibleCarCount == 0)
-                        builder.AddLabel("<color=yellow>No cars match the current filter.</color>");
-                    else
-                        builder.AddLabel($"{_eligibleCarCount} car(s) match filter");
                 }
             }
 
-            // Show "Deliver after pickup" toggle during pickup execution too
+            // Show filter controls and deliver-after-pickup toggle during pickup execution
             if (sm != null && sm.Mode == AutopilotMode.Pickup && sm.Phase is not (Idle or Completed))
             {
+                // Sync UI filter state from state machine so edits go to the live filter
+                if (sm.PickupFilter != null)
+                    _pickupFilter = sm.PickupFilter;
+
+                BuildPickupFilterUI(builder, loco, _pickupFilter);
+
                 builder.AddFieldToggle("Deliver after pickup",
                     () => sm.DeliverAfterPickup,
                     (val) => sm.DeliverAfterPickup = val);

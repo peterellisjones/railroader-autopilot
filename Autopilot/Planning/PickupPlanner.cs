@@ -119,29 +119,17 @@ namespace Autopilot.Planning
 
                 case Autopilot.Model.FilterMode.Industry:
                 {
-                    var ops = OpsController.Shared;
-                    if (ops == null) return false;
-                    var carPos = car.GetCenterPosition(Graph.Shared);
-                    foreach (var area in ops.Areas)
-                    {
-                        if (!area.Contains(carPos)) continue;
-                        foreach (var industry in area.Industries)
-                        {
-                            if (filter.From.CheckedItems.Contains(industry.name))
-                                return true;
-                        }
-                    }
-                    return false;
+                    // Find the closest industry to the car's physical position
+                    var industry = FindClosestIndustry(car);
+                    return industry != null && filter.From.CheckedItems.Contains(industry.name);
                 }
 
                 case Autopilot.Model.FilterMode.Destination:
                 {
-                    // From:Destination checks the car's waybill origin siding
-                    var waybill = car.Waybill;
-                    if (waybill == null) return false;
-                    var origin = waybill.Value.Origin;
-                    if (origin == null) return false;
-                    return filter.From.CheckedItems.Contains(origin.Value.DisplayName);
+                    // From:Destination checks which siding the car is physically at
+                    // by finding the closest OpsCarPosition center point
+                    var sidingName = FindClosestSidingName(car);
+                    return sidingName != null && filter.From.CheckedItems.Contains(sidingName);
                 }
 
                 default:
@@ -191,6 +179,72 @@ namespace Autopilot.Planning
                 default:
                     return true;
             }
+        }
+
+        /// <summary>
+        /// Find the closest industry to a car's physical position.
+        /// Iterates all industry components across all areas and picks the one
+        /// whose center point is nearest to the car.
+        /// </summary>
+        private static Industry? FindClosestIndustry(Car car)
+        {
+            var ops = OpsController.Shared;
+            if (ops == null) return null;
+
+            var carPos = car.GetCenterPosition(Graph.Shared);
+            Industry? closest = null;
+            float closestDist = float.MaxValue;
+
+            foreach (var area in ops.Areas)
+            {
+                foreach (var industry in area.Industries)
+                {
+                    foreach (var component in industry.Components)
+                    {
+                        float dist = UnityEngine.Vector3.Distance(carPos, component.CenterPoint);
+                        if (dist < closestDist)
+                        {
+                            closestDist = dist;
+                            closest = industry;
+                        }
+                    }
+                }
+            }
+
+            return closest;
+        }
+
+        /// <summary>
+        /// Find the DisplayName of the siding closest to a car's physical position.
+        /// Checks all IndustryComponent center points across all areas/industries.
+        /// The DisplayName matches what OpsCarPosition.DisplayName shows in waybills.
+        /// </summary>
+        private static string? FindClosestSidingName(Car car)
+        {
+            var ops = OpsController.Shared;
+            if (ops == null) return null;
+
+            var carPos = car.GetCenterPosition(Graph.Shared);
+            string? closestName = null;
+            float closestDist = float.MaxValue;
+
+            foreach (var area in ops.Areas)
+            {
+                foreach (var industry in area.Industries)
+                {
+                    foreach (var component in industry.Components)
+                    {
+                        float dist = UnityEngine.Vector3.Distance(carPos, component.CenterPoint);
+                        if (dist < closestDist)
+                        {
+                            closestDist = dist;
+                            closestName = component.DisplayName;
+                        }
+                    }
+                }
+            }
+
+            return closestName;
         }
 
         /// <summary>
@@ -454,24 +508,11 @@ namespace Autopilot.Planning
                         key = area?.name;
                         break;
                     case Autopilot.Model.FilterMode.Industry:
-                        if (opsController != null)
-                        {
-                            var carPos = car.GetCenterPosition(Graph.Shared);
-                            foreach (var a in opsController.Areas)
-                            {
-                                if (!a.Contains(carPos)) continue;
-                                foreach (var ind in a.Industries)
-                                {
-                                    key = ind.name;
-                                    break;
-                                }
-                                if (key != null) break;
-                            }
-                        }
+                        var ind = FindClosestIndustry(car);
+                        key = ind?.name;
                         break;
                     case Autopilot.Model.FilterMode.Destination:
-                        var wb = car.Waybill;
-                        key = wb?.Origin?.DisplayName;
+                        key = FindClosestSidingName(car);
                         break;
                 }
 
