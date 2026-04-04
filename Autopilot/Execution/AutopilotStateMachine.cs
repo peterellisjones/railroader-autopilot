@@ -13,6 +13,9 @@ namespace Autopilot.Execution
         private readonly DeliveryPlanner _planner;
         private BaseLocomotive _loco;
         private PickupPlanner? _pickupPlanner;
+        private readonly RefuelPlanner _refuelPlanner;
+        private bool _refuelRequested;
+        private string? _lastRefuelFuelType;
 
         public AutopilotPhase Phase { get; private set; } = new Idle();
 
@@ -52,6 +55,7 @@ namespace Autopilot.Execution
         {
             _trainService = trainService;
             _planner = new DeliveryPlanner(trainService);
+            _refuelPlanner = new RefuelPlanner(trainService);
         }
 
         public void Start(BaseLocomotive loco, AutopilotMode mode = AutopilotMode.Delivery, string? destinationName = null)
@@ -113,6 +117,15 @@ namespace Autopilot.Execution
                 _retryPickupCount));
         }
 
+        /// <summary>
+        /// Request an immediate refuel on the next planning tick.
+        /// Called by the "Refuel Now" button.
+        /// </summary>
+        public void RequestRefuel()
+        {
+            _refuelRequested = true;
+        }
+
         // Retry state preserved when entering Failed
         private PlanningContext? _retryContext;
         private AutopilotMode _retryMode;
@@ -128,6 +141,7 @@ namespace Autopilot.Execution
             // coupling state. The caches are still useful within BuildPlan
             // (which runs inside a single tick).
             _trainService.ClearPlanCaches();
+            _refuelPlanner.ClearCache();
 
             switch (Phase)
             {
@@ -166,6 +180,12 @@ namespace Autopilot.Execution
                     if (exec.Mode == AutopilotMode.Pickup && exec.CurrentAction is PickupAction pa)
                         pickupCount += pa.TargetCarCount;
 
+                    // Track last refueled fuel type for opportunistic check
+                    if (exec.CurrentAction is RefuelAction refuelAction)
+                        _lastRefuelFuelType = refuelAction.FuelType;
+                    else
+                        _lastRefuelFuelType = null;
+
                     SetPhase(new PlanningPhase(context, exec.Mode, exec.TargetDestination, pickupCount));
                     return;
 
@@ -174,6 +194,56 @@ namespace Autopilot.Execution
                     EnterFailed(failed.Reason, exec);
                     return;
             }
+        }
+
+        /// <summary>
+        /// Check if the loco needs refueling and create a RefuelAction if so.
+        /// Returns the action if refueling is needed, null otherwise.
+        /// </summary>
+        private RefuelAction? TryCreateRefuelAction(BaseLocomotive loco, int thresholdPercent)
+        {
+            if (!_trainService.GetAutoRefuelEnabled(loco) && !_refuelRequested)
+                return null;
+
+            int threshold = _refuelRequested ? 100 : thresholdPercent;
+            if (threshold <= 0 && !_refuelRequested)
+                return null;
+
+            // After an opportunistic refuel, check for nearby second fuel type
+            if (_lastRefuelFuelType != null)
+            {
+                var nearby = _refuelPlanner.FindNearbyOpportunistic(loco, _lastRefuelFuelType);
+                _lastRefuelFuelType = null;
+                if (nearby != null)
+                {
+                    Loader.Mod.Logger.Log($"Autopilot: opportunistic refuel {nearby.FuelType} at nearby facility");
+                    return new RefuelAction(nearby, loco, _trainService);
+                }
+            }
+
+            var lowTypes = _refuelPlanner.GetLowFuelTypes(loco, threshold);
+            if (lowTypes.Count == 0)
+            {
+                if (_refuelRequested)
+                {
+                    _refuelRequested = false;
+                    Loader.Mod.Logger.Log("Autopilot: Refuel requested but all fuel types are sufficient.");
+                }
+                return null;
+            }
+
+            var facility = _refuelPlanner.FindBestFacility(loco, lowTypes);
+            if (facility == null)
+            {
+                var typeStr = string.Join(", ", lowTypes);
+                Loader.Mod.Logger.Log($"Autopilot: No reachable facility for {typeStr}");
+                _refuelRequested = false;
+                return null;
+            }
+
+            _refuelRequested = false;
+            Loader.Mod.Logger.Log($"Autopilot: action=Refuel {facility.FuelType} at {facility.Location.Segment?.id}, dist={facility.Distance:F0}m");
+            return new RefuelAction(facility, loco, _trainService);
         }
 
         private void TickPlanning(PlanningPhase p)
@@ -196,6 +266,17 @@ namespace Autopilot.Execution
 
             if (!plan.HasDeliveries && !plan.NeedsRunaround && !plan.NeedsReposition && !plan.NeedsSplit)
             {
+                // Completion refuel check: before parking, check with higher threshold
+                if (p.Context.PendingSplit == null)
+                {
+                    var completionRefuelAction = TryCreateRefuelAction(_loco, Loader.Settings.completionRefuelThreshold);
+                    if (completionRefuelAction != null)
+                    {
+                        SetPhase(new Executing(plan, completionRefuelAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                        return;
+                    }
+                }
+
                 // If there are dropped cars pending recouple, go get them first
                 if (p.Context.PendingSplit != null)
                 {
@@ -217,6 +298,14 @@ namespace Autopilot.Execution
                     EnterFailed($"{p.Context.SkippedCars.Count} car(s) skipped — siding(s) full. Stop and restart autopilot to retry.", p);
                 else
                     EnterFailed("No deliverable cars found. " + string.Join(" ", plan.Warnings), p);
+                return;
+            }
+
+            // Mid-run refuel check: before next delivery/action, check if fuel is low
+            var midRunRefuelAction = TryCreateRefuelAction(_loco, Loader.Settings.midRunRefuelThreshold);
+            if (midRunRefuelAction != null)
+            {
+                SetPhase(new Executing(plan, midRunRefuelAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
                 return;
             }
 
@@ -274,6 +363,14 @@ namespace Autopilot.Execution
 
         private void TickPickupPlanning(PlanningPhase p)
         {
+            // Mid-run refuel check for pickup mode
+            var pickupRefuelAction = TryCreateRefuelAction(_loco, Loader.Settings.midRunRefuelThreshold);
+            if (pickupRefuelAction != null)
+            {
+                SetPhase(new Executing(null, pickupRefuelAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                return;
+            }
+
             PickupTarget? target;
             try
             {
@@ -288,6 +385,14 @@ namespace Autopilot.Execution
 
             if (target == null)
             {
+                // Completion refuel check before finishing pickup mode
+                var pickupCompletionRefuel = TryCreateRefuelAction(_loco, Loader.Settings.completionRefuelThreshold);
+                if (pickupCompletionRefuel != null)
+                {
+                    SetPhase(new Executing(null, pickupCompletionRefuel, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                    return;
+                }
+
                 if (DeliverAfterPickup)
                 {
                     Loader.Mod.Logger.Log($"Autopilot: Pickup complete ({p.PickupCount} cars) — starting delivery");
