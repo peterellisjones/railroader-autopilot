@@ -73,6 +73,7 @@ namespace Autopilot.Planning
                 DirectedPosition destLocation = default;
                 Car? coupleTarget = null;
                 float availableSpace = 0f;
+                int selectedSpanIndex = 0;
                 bool foundDest = false;
                 var failedSpans = new HashSet<int>();
                 // Prefer candidates on a span the train is already on.
@@ -107,6 +108,7 @@ namespace Autopilot.Planning
                         destLocation = candidate.loc;
                         coupleTarget = candidate.coupleTo;
                         availableSpace = candidate.availableSpace;
+                        selectedSpanIndex = candidate.spanIndex;
                         foundDest = true;
                         break;
                     }
@@ -140,16 +142,16 @@ namespace Autopilot.Planning
                     catch { break; }
                     if (nextDestLoc.Segment == null || nextDestLoc.Segment != destLocation.Segment)
                         break;
-                    // Previous car now needs its full length (it's no longer the last).
-                    // Next car only needs MinOverlap.
+                    // Previous car now needs its full length plus coupling gap
+                    // (it's no longer the last). Next car only needs MinOverlap.
                     var prevCar = carGroup[carGroup.Count - 1];
-                    usedSpace += prevCar?.carLength ?? car.CarLength;
+                    usedSpace += (prevCar?.carLength ?? car.CarLength) + AutopilotConstants.ConsistGapPerCar;
                     if (usedSpace + MinOverlap > availableSpace)
                         break;
                     carGroup.Add((nextCar as CarAdapter)?.Car);
                 }
 
-                steps.Add(new DeliveryStep(carGroup, destination, destLocation, coupleTarget));
+                steps.Add(new DeliveryStep(carGroup, destination, destLocation, coupleTarget, selectedSpanIndex));
                 if (steps.Count >= maxSteps)
                     return steps;
                 i += carGroup.Count;

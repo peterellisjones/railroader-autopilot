@@ -18,16 +18,18 @@ namespace Autopilot.Model
         public OpsCarPosition Destination { get; }
         public DirectedPosition DestinationLocation { get; }
         public Car? CoupleTarget { get; }
+        public int SpanIndex { get; }
         public StepStatus Status { get; set; }
         public string? ErrorMessage { get; set; }
 
         public DeliveryStep(List<Car> cars, OpsCarPosition destination, DirectedPosition destinationLocation,
-            Car? coupleTarget = null)
+            Car? coupleTarget = null, int spanIndex = 0)
         {
             Cars = cars;
             Destination = destination;
             DestinationLocation = destinationLocation;
             CoupleTarget = coupleTarget;
+            SpanIndex = spanIndex;
             Status = StepStatus.Pending;
         }
 

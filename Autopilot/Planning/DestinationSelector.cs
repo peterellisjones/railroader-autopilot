@@ -88,6 +88,10 @@ namespace Autopilot.Planning
                     carsOnSpan.Add(car);
                 }
 
+                // Add coupling gaps between existing cars on the span.
+                if (carsOnSpan.Count > 1)
+                    occupiedLength += (carsOnSpan.Count - 1) * AutopilotConstants.ConsistGapPerCar;
+
                 float availableSpace = span.Length - occupiedLength;
 
                 // If there are existing cars, find the one nearest the loco

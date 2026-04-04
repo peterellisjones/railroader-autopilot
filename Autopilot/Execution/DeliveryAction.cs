@@ -196,32 +196,18 @@ namespace Autopilot.Execution
             DirectedPosition best = step.DestinationLocation;
             float bestDist = 0f;
 
-            // Only check the span that contains the DestinationLocation.
-            // For multi-span destinations (multiple branches), the candidate
-            // was already chosen by GetDestinationCandidates — don't pick
-            // an endpoint on a completely different branch.
-            var destSegId = step.DestinationLocation.Segment?.id;
-            foreach (var span in step.Destination.Spans)
+            var span = step.Destination.Spans[step.SpanIndex];
+            foreach (var ep in new[] { span.lower, span.upper })
             {
-                bool spanMatches = false;
-                if (span.lower.HasValue && span.lower.Value.segment?.id == destSegId)
-                    spanMatches = true;
-                if (span.upper.HasValue && span.upper.Value.segment?.id == destSegId)
-                    spanMatches = true;
-                if (!spanMatches) continue;
+                if (!ep.HasValue || ep.Value.segment == null) continue;
 
-                foreach (var ep in new[] { span.lower, span.upper })
+                graph.TryFindDistance(loco.LocationF, ep.Value, out float dF, out _);
+                graph.TryFindDistance(loco.LocationR, ep.Value, out float dR, out _);
+                float dist = Math.Max(dF, dR);
+                if (dist > bestDist)
                 {
-                    if (!ep.HasValue || ep.Value.segment == null) continue;
-
-                    graph.TryFindDistance(loco.LocationF, ep.Value, out float dF, out _);
-                    graph.TryFindDistance(loco.LocationR, ep.Value, out float dR, out _);
-                    float dist = Math.Max(dF, dR);
-                    if (dist > bestDist)
-                    {
-                        bestDist = dist;
-                        best = DirectedPosition.FromLocation(ep.Value);
-                    }
+                    bestDist = dist;
+                    best = DirectedPosition.FromLocation(ep.Value);
                 }
             }
 
