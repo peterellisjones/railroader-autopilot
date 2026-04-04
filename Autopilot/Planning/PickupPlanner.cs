@@ -374,5 +374,166 @@ namespace Autopilot.Planning
             return best.target;
         }
 
+        /// <summary>
+        /// Returns all cars matching the full filter (used for car count display).
+        /// </summary>
+        public List<Car> GetEligibleCars(BaseLocomotive loco, PickupFilter filter)
+        {
+            _trainService.ClearPlanCaches();
+            var nearbyCars = _trainService.GetNearbyCars(loco);
+            var graph = Graph.Shared;
+            var locoPos = loco.GetCenterPosition(graph);
+
+            HashSet<string> switchlistCarIds;
+            if (filter.From.Mode == Autopilot.Model.FilterMode.Switchlist || filter.To.Mode == Autopilot.Model.FilterMode.Switchlist)
+                switchlistCarIds = _trainService.GetSwitchlistCarIds();
+            else
+                switchlistCarIds = new HashSet<string>();
+
+            var result = new List<Car>();
+            foreach (var car in nearbyCars)
+            {
+                if (filter.MaxDistance < float.MaxValue)
+                {
+                    var carPos = car.GetCenterPosition(graph);
+                    if (Vector3.Distance(locoPos, carPos) > filter.MaxDistance)
+                        continue;
+                }
+
+                var wrapped = (ICar)new CarAdapter(car);
+                if (!MatchesFilter(wrapped, filter, switchlistCarIds))
+                    continue;
+
+                if (!MatchesFromFilter(car, filter))
+                    continue;
+
+                if (!MatchesToFilter(car, filter))
+                    continue;
+
+                result.Add(car);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns checklist options for the From axis, cross-filtered by current To settings.
+        /// </summary>
+        public List<string> GetFromOptions(BaseLocomotive loco, PickupFilter filter)
+        {
+            // Get cars that pass the To filter (and base + distance), ignoring From
+            var toOnlyFilter = new PickupFilter(FilterAxis.Any, filter.To, filter.MaxDistance, false);
+            var cars = GetEligibleCars(loco, toOnlyFilter);
+            return ExtractFromGroupingKeys(cars, filter.From.Mode);
+        }
+
+        /// <summary>
+        /// Returns checklist options for the To axis, cross-filtered by current From settings.
+        /// </summary>
+        public List<string> GetToOptions(BaseLocomotive loco, PickupFilter filter)
+        {
+            var fromOnlyFilter = new PickupFilter(filter.From, FilterAxis.Any, filter.MaxDistance, false);
+            var cars = GetEligibleCars(loco, fromOnlyFilter);
+            return ExtractToGroupingKeys(cars, filter.To.Mode);
+        }
+
+        /// <summary>
+        /// Extracts the sorted set of From-axis grouping keys from a list of cars.
+        /// </summary>
+        private List<string> ExtractFromGroupingKeys(List<Car> cars, Autopilot.Model.FilterMode mode)
+        {
+            var keys = new HashSet<string>();
+            var opsController = OpsController.Shared;
+
+            foreach (var car in cars)
+            {
+                string? key = null;
+                switch (mode)
+                {
+                    case Autopilot.Model.FilterMode.Area:
+                        var area = opsController?.ClosestArea(car);
+                        key = area?.name;
+                        break;
+                    case Autopilot.Model.FilterMode.Industry:
+                        if (opsController != null)
+                        {
+                            var carPos = car.GetCenterPosition(Graph.Shared);
+                            foreach (var a in opsController.Areas)
+                            {
+                                if (!a.Contains(carPos)) continue;
+                                foreach (var ind in a.Industries)
+                                {
+                                    key = ind.name;
+                                    break;
+                                }
+                                if (key != null) break;
+                            }
+                        }
+                        break;
+                    case Autopilot.Model.FilterMode.Destination:
+                        var wb = car.Waybill;
+                        key = wb?.Origin?.DisplayName;
+                        break;
+                }
+
+                if (!string.IsNullOrEmpty(key))
+                    keys.Add(key!);
+            }
+
+            var result = keys.ToList();
+            result.Sort();
+            return result;
+        }
+
+        /// <summary>
+        /// Extracts the sorted set of To-axis grouping keys from a list of cars.
+        /// </summary>
+        private List<string> ExtractToGroupingKeys(List<Car> cars, Autopilot.Model.FilterMode mode)
+        {
+            var keys = new HashSet<string>();
+            var opsController = OpsController.Shared;
+
+            foreach (var car in cars)
+            {
+                var waybill = car.Waybill;
+                if (waybill == null) continue;
+
+                string? key = null;
+                switch (mode)
+                {
+                    case Autopilot.Model.FilterMode.Area:
+                        var area = opsController?.AreaForCarPosition(waybill.Value.Destination);
+                        key = area?.name;
+                        break;
+                    case Autopilot.Model.FilterMode.Industry:
+                        if (opsController != null)
+                        {
+                            foreach (var a in opsController.Areas)
+                            {
+                                foreach (var ind in a.Industries)
+                                {
+                                    if (ind.Contains(waybill.Value.Destination))
+                                    {
+                                        key = ind.name;
+                                        break;
+                                    }
+                                }
+                                if (key != null) break;
+                            }
+                        }
+                        break;
+                    case Autopilot.Model.FilterMode.Destination:
+                        key = waybill.Value.Destination.DisplayName;
+                        break;
+                }
+
+                if (!string.IsNullOrEmpty(key))
+                    keys.Add(key!);
+            }
+
+            var result = keys.ToList();
+            result.Sort();
+            return result;
+        }
+
     }
 }
