@@ -192,175 +192,166 @@ namespace Autopilot.Planning
                     chainOrientations.Add(chain);
                 }
 
-                List<ICar> orderedChain = null;
-                List<ICar> targets = null;
-                foreach (var orientation in chainOrientations)
-                {
-                    var t = FilterAccessibleTargets(orientation, matchingCarIds);
-                    if (t.Count > 0)
-                    {
-                        orderedChain = orientation;
-                        targets = t;
-                        break;
-                    }
-                }
-                if (orderedChain == null || targets == null || targets.Count == 0)
-                    continue;
-
-                var coupleTarget = (orderedChain[0] as CarAdapter)?.Car;
-                if (coupleTarget == null)
-                    continue;
-
-                // Couple location: 0.5m past the couple target on the accessible side.
-                var target = orderedChain[0];
+                // Try both orientations — each end of the chain is a
+                // separate candidate.  When one end is blocked the other
+                // may be reachable from a different approach direction.
                 var coupled = _trainService.GetCoupled(loco);
                 float trainLen = _trainService.GetTrainLength(loco);
 
-                var endsToTry = new[] { Car.LogicalEnd.A, Car.LogicalEnd.B };
-                // For coupled chains, only try the free end
-                if (orderedChain.Count > 1)
+                foreach (var orientation in chainOrientations)
                 {
-                    var nextInChain = orderedChain[1];
-                    var freeEnd = target.CoupledTo(Car.LogicalEnd.A)?.id == nextInChain.id
-                        ? Car.LogicalEnd.B : Car.LogicalEnd.A;
-                    endsToTry = new[] { freeEnd };
-                }
+                    var targets = FilterAccessibleTargets(orientation, matchingCarIds);
+                    if (targets.Count == 0)
+                        continue;
 
-                CoupleWaypoint coupleLocation = default;
-                float distance = float.MaxValue;
-                bool reachable = false;
+                    var coupleTarget = (orientation[0] as CarAdapter)?.Car;
+                    if (coupleTarget == null)
+                        continue;
 
-                foreach (var logicalEnd in endsToTry)
-                {
-                    var coupleWp = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
-                    var testLoc = coupleWp.ToLocation();
+                    var target = orientation[0];
 
-                    // Route with actual train length from both loco ends.
-                    var ignored = new System.Collections.Generic.HashSet<Car>(coupled);
-                    float routeDist = float.MaxValue;
-                    foreach (var locoLoc in new[] { loco.LocationF, loco.LocationR })
+                    var endsToTry = new[] { Car.LogicalEnd.A, Car.LogicalEnd.B };
+                    if (orientation.Count > 1)
                     {
-                        var impasse = new System.Collections.Generic.HashSet<Car>();
-                        var routeSteps = new System.Collections.Generic.List<Track.Search.RouteSearch.Step>();
-                        bool routeFound = Track.Search.RouteSearch.FindRoute(
-                            graph, locoLoc, testLoc,
-                            RouteChecker.DefaultHeuristic, routeSteps,
-                            out Track.Search.RouteSearch.Metrics routeMetrics,
-                            checkForCars: true, trainLength: trainLen,
-                            trainMomentum: 0f, maxIterations: 5000,
-                            checkForCarsIgnored: ignored,
-                            checkForCarsImpasse: impasse);
-                        // RouteSearch with checkForCars only detects uncoupled
-                        // cars; coupled groups are invisible. Check the actual
-                        // route segments for any non-target car that would block.
-                        if (routeFound)
+                        var nextInChain = orientation[1];
+                        var freeEnd = target.CoupledTo(Car.LogicalEnd.A)?.id == nextInChain.id
+                            ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+                        endsToTry = new[] { freeEnd };
+                    }
+
+                    CoupleWaypoint coupleLocation = default;
+                    float distance = float.MaxValue;
+                    bool reachable = false;
+
+                    foreach (var logicalEnd in endsToTry)
+                    {
+                        var coupleWp = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
+                        var testLoc = coupleWp.ToLocation();
+
+                        var ignored = new System.Collections.Generic.HashSet<Car>(coupled);
+                        float routeDist = float.MaxValue;
+                        foreach (var locoLoc in new[] { loco.LocationF, loco.LocationR })
                         {
-                            var routeSegs = ReversalCounter.DeduplicateSegments(routeSteps);
-                            var terminalSegId = testLoc.segment?.id;
-
-                            // Determine approach direction on the terminal segment
-                            // from the couple point vs target car center.
-                            // The couple point is offset past the car's free end
-                            // in the approach direction, so cpDist < carCenter
-                            // means approach from End.A (low distance).
-                            bool? approachFromEndA = null;
-                            if (terminalSegId != null && coupleTarget.LocationA.segment?.id == terminalSegId
-                                && coupleTarget.LocationB.segment?.id == terminalSegId)
+                            var impasse = new System.Collections.Generic.HashSet<Car>();
+                            var routeSteps = new System.Collections.Generic.List<Track.Search.RouteSearch.Step>();
+                            bool routeFound = Track.Search.RouteSearch.FindRoute(
+                                graph, locoLoc, testLoc,
+                                RouteChecker.DefaultHeuristic, routeSteps,
+                                out Track.Search.RouteSearch.Metrics routeMetrics,
+                                checkForCars: true, trainLength: trainLen,
+                                trainMomentum: 0f, maxIterations: 5000,
+                                checkForCarsIgnored: ignored,
+                                checkForCarsImpasse: impasse);
+                            // RouteSearch with checkForCars only detects uncoupled
+                            // cars; coupled groups are invisible. Check the actual
+                            // route segments for any non-target car that would block.
+                            if (routeFound)
                             {
-                                float carCenter = (coupleTarget.LocationA.distance + coupleTarget.LocationB.distance) / 2f;
-                                approachFromEndA = testLoc.distance < carCenter;
-                            }
+                                var routeSegs = ReversalCounter.DeduplicateSegments(routeSteps);
+                                var terminalSegId = testLoc.segment?.id;
 
-                            // Verify the route enters the terminal segment from
-                            // the correct side. RouteSearch ignores coupled cars,
-                            // so it may find a route that enters from the far end —
-                            // requiring the loco to pass through the chain itself.
-                            if (approachFromEndA.HasValue && routeSegs.Count >= 2)
-                            {
-                                var prevSeg = routeSegs[routeSegs.Count - 2];
-                                var termSeg = routeSegs[routeSegs.Count - 1];
-                                if (termSeg.id == terminalSegId)
+                                // Determine approach direction on the terminal segment
+                                // from the couple point vs target car center.
+                                // The couple point is offset past the car's free end
+                                // in the approach direction, so cpDist < carCenter
+                                // means approach from End.A (low distance).
+                                bool? approachFromEndA = null;
+                                if (terminalSegId != null && coupleTarget.LocationA.segment?.id == terminalSegId
+                                    && coupleTarget.LocationB.segment?.id == terminalSegId)
                                 {
-                                    var sharedNode = Services.TrackWalker.FindSharedNode(prevSeg, termSeg);
-                                    if (sharedNode != null)
+                                    float carCenter = (coupleTarget.LocationA.distance + coupleTarget.LocationB.distance) / 2f;
+                                    approachFromEndA = testLoc.distance < carCenter;
+                                }
+
+                                // Verify the route enters the terminal segment from
+                                // the correct side. RouteSearch ignores coupled cars,
+                                // so it may find a route that enters from the far end —
+                                // requiring the loco to pass through the chain itself.
+                                if (approachFromEndA.HasValue && routeSegs.Count >= 2)
+                                {
+                                    var prevSeg = routeSegs[routeSegs.Count - 2];
+                                    var termSeg = routeSegs[routeSegs.Count - 1];
+                                    if (termSeg.id == terminalSegId)
                                     {
-                                        bool entersFromEndA = (termSeg.NodeForEnd(TrackSegment.End.A) == sharedNode);
-                                        if (entersFromEndA != approachFromEndA.Value)
+                                        var sharedNode = Services.TrackWalker.FindSharedNode(prevSeg, termSeg);
+                                        if (sharedNode != null)
                                         {
-                                            Log($"  Route to {target.DisplayName} enters {terminalSegId} from wrong end");
-                                            routeFound = false;
+                                            bool entersFromEndA = (termSeg.NodeForEnd(TrackSegment.End.A) == sharedNode);
+                                            if (entersFromEndA != approachFromEndA.Value)
+                                            {
+                                                Log($"  Route to {target.DisplayName} enters {terminalSegId} from wrong end");
+                                                routeFound = false;
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            foreach (var seg in routeSegs)
-                            {
-                                if (!routeFound) break;
-                                if (segmentToCars.TryGetValue(seg.id, out var carsOnSeg))
+                                foreach (var seg in routeSegs)
                                 {
-                                    foreach (var blockCar in carsOnSeg)
+                                    if (!routeFound) break;
+                                    if (segmentToCars.TryGetValue(seg.id, out var carsOnSeg))
                                     {
-                                        if (chainIds.Contains(blockCar.id))
-                                            continue;
-
-                                        // On the terminal segment, only block if the car
-                                        // is between the approach end and the couple point.
-                                        if (seg.id == terminalSegId && approachFromEndA.HasValue)
+                                        foreach (var blockCar in carsOnSeg)
                                         {
-                                            float cpDist = testLoc.distance;
-                                            float carMinDist = float.MaxValue;
-                                            float carMaxDist = float.MinValue;
-                                            if (blockCar.LocationA.segment?.id == seg.id)
-                                            {
-                                                carMinDist = blockCar.LocationA.distance;
-                                                carMaxDist = blockCar.LocationA.distance;
-                                            }
-                                            if (blockCar.LocationB.segment?.id == seg.id)
-                                            {
-                                                carMinDist = System.Math.Min(carMinDist, blockCar.LocationB.distance);
-                                                carMaxDist = System.Math.Max(carMaxDist, blockCar.LocationB.distance);
-                                            }
-                                            if (carMinDist == float.MaxValue)
-                                                continue; // car not actually on this segment
-
-                                            // Approach from End.A: route covers [0, cpDist].
-                                            // Approach from End.B: route covers [cpDist, segLen].
-                                            bool inPath = approachFromEndA.Value
-                                                ? carMinDist < cpDist
-                                                : carMaxDist > cpDist;
-
-                                            if (!inPath)
+                                            if (chainIds.Contains(blockCar.id))
                                                 continue;
+
+                                            // On the terminal segment, only block if the car
+                                            // is between the approach end and the couple point.
+                                            if (seg.id == terminalSegId && approachFromEndA.HasValue)
+                                            {
+                                                float cpDist = testLoc.distance;
+                                                float carMinDist = float.MaxValue;
+                                                float carMaxDist = float.MinValue;
+                                                if (blockCar.LocationA.segment?.id == seg.id)
+                                                {
+                                                    carMinDist = blockCar.LocationA.distance;
+                                                    carMaxDist = blockCar.LocationA.distance;
+                                                }
+                                                if (blockCar.LocationB.segment?.id == seg.id)
+                                                {
+                                                    carMinDist = System.Math.Min(carMinDist, blockCar.LocationB.distance);
+                                                    carMaxDist = System.Math.Max(carMaxDist, blockCar.LocationB.distance);
+                                                }
+                                                if (carMinDist == float.MaxValue)
+                                                    continue;
+
+                                                bool inPath = approachFromEndA.Value
+                                                    ? carMinDist < cpDist
+                                                    : carMaxDist > cpDist;
+
+                                                if (!inPath)
+                                                    continue;
+                                            }
+
+                                            Log($"  Route to {target.DisplayName} blocked by {blockCar.DisplayName} on {seg.id}");
+                                            routeFound = false;
+                                            break;
                                         }
-
-                                        Log($"  Route to {target.DisplayName} blocked by {blockCar.DisplayName} on {seg.id}");
-                                        routeFound = false;
-                                        break;
                                     }
+                                    if (!routeFound) break;
                                 }
-                                if (!routeFound) break;
                             }
+                            if (routeFound && routeMetrics.Distance < routeDist)
+                                routeDist = routeMetrics.Distance;
                         }
-                        if (routeFound && routeMetrics.Distance < routeDist)
-                            routeDist = routeMetrics.Distance;
+
+                        Log($"Trying {target.DisplayName} end {logicalEnd}: waypoint on {testLoc.segment?.id}|{testLoc.distance:F1}, dist={routeDist:F0}");
+                        if (routeDist < distance)
+                        {
+                            coupleLocation = coupleWp;
+                            distance = routeDist;
+                            reachable = true;
+                        }
                     }
 
-                    Log($"Trying {target.DisplayName} end {logicalEnd}: waypoint on {testLoc.segment?.id}|{testLoc.distance:F1}, dist={routeDist:F0}");
-                    if (routeDist < distance)
-                    {
-                        coupleLocation = coupleWp;
-                        distance = routeDist;
-                        reachable = true;
-                    }
+                    if (!reachable)
+                        continue;
+
+                    var targetCars = targets.Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
+                    candidates.Add((new PickupTarget(
+                        coupleTarget, coupleLocation, targetCars!, destinationName), distance));
                 }
-
-                if (!reachable)
-                    continue;
-
-                var targetCars = targets.Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
-                candidates.Add((new PickupTarget(
-                    coupleTarget, coupleLocation, targetCars!, destinationName), distance));
             }
 
             if (candidates.Count == 0)
