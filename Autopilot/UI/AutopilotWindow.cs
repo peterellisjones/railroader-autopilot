@@ -295,6 +295,14 @@ namespace Autopilot.UI
                 }
             }
 
+            // Show "Deliver after pickup" toggle during pickup execution too
+            if (sm != null && sm.Mode == AutopilotMode.Pickup && sm.Phase is not (Idle or Completed))
+            {
+                builder.AddFieldToggle("Deliver after pickup",
+                    () => sm.DeliverAfterPickup,
+                    (val) => sm.DeliverAfterPickup = val);
+            }
+
             // Control buttons
             bool autopilotRunning = sm != null && sm.Phase is not (Idle or Completed or Failed);
 
