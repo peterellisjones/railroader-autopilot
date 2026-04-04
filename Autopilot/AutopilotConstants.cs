@@ -11,9 +11,6 @@ namespace Autopilot
         /// <summary>Timeout waiting for decouple confirmation (seconds).</summary>
         public const float DecoupleWaitSeconds = 5f;
 
-        /// <summary>Speed limit while approaching a fuel facility (mph).</summary>
-        public const int RefuelApproachSpeedMph = 5;
-
         /// <summary>Tank considered full at this fill percentage.</summary>
         public const float FullThresholdPercent = 100f;
 

@@ -6,9 +6,7 @@ using Game.State;
 using Helpers;
 using KeyValue.Runtime;
 using Model;
-using Model.AI;
 using Model.Ops;
-using UI.EngineControls;
 using Model.Ops.Definition;
 using RollingStock;
 using Track;
@@ -39,9 +37,6 @@ namespace Autopilot.Execution
         private string _statusMessage;
         private string? _initError;
 
-        // Speed state — restore original speed after refuel approach
-        private int _previousMaxSpeed;
-
         // Loader state — resolved once when we start refueling
         private CarLoaderSequencer? _sequencer;
         private bool _loaderActivated;
@@ -62,10 +57,6 @@ namespace Autopilot.Execution
 
             try
             {
-                // Save original max speed before overriding for slow approach
-                var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
-                _previousMaxSpeed = persistence.Orders.MaxSpeedMph;
-
                 // Compute precise waypoint that positions the fuel car's load slot
                 // directly under the loader, using WaypointQueue's approach.
                 var preciseLocation = ComputeLoadSlotWaypoint(loco, trainService);
@@ -73,14 +64,10 @@ namespace Autopilot.Execution
 
                 trainService.SetWaypoint(loco, waypointDP);
 
-                // Override AE speed to approach speed for slow approach
-                var helper = new AutoEngineerOrdersHelper(loco, persistence);
-                helper.SetOrdersValue(null, null, AutopilotConstants.RefuelApproachSpeedMph, null, null);
-
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: moving to {facility.FuelType} facility " +
                     $"at {facility.Location.Segment?.id}|{facility.Location.DistanceFromA:F1}, " +
                     $"precise waypoint at {preciseLocation.segment?.id}|{preciseLocation.distance:F1}, " +
-                    $"distance={facility.Distance:F0}m, approach speed={AutopilotConstants.RefuelApproachSpeedMph}mph");
+                    $"distance={facility.Distance:F0}m");
             }
             catch (Exception ex)
             {
@@ -413,12 +400,6 @@ namespace Autopilot.Execution
         private ActionOutcome TickCleanup(BaseLocomotive loco, TrainService trainService)
         {
             DeactivateLoader();
-
-            // Restore original max speed before stopping
-            var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
-            var helper = new AutoEngineerOrdersHelper(loco, persistence);
-            helper.SetOrdersValue(null, null, _previousMaxSpeed, null, null);
-
             trainService.StopAE(loco);
 
             float level = trainService.GetFuelLevel(loco, _facility.FuelType);
