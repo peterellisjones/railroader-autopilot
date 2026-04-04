@@ -14,8 +14,8 @@ namespace Autopilot
         /// <summary>Speed limit while approaching a fuel facility (mph).</summary>
         public const int RefuelApproachSpeedMph = 5;
 
-        /// <summary>Tank considered full when remaining capacity is below this (game units).</summary>
-        public const float FullThresholdUnits = 25f;
+        /// <summary>Tank considered full at this fill percentage.</summary>
+        public const float FullThresholdPercent = 100f;
 
         /// <summary>Graph distance (meters) for opportunistic nearby refueling.</summary>
         public const float NearbyFacilityDistanceMeters = 100f;

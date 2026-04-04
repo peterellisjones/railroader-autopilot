@@ -360,8 +360,9 @@ namespace Autopilot.Execution
             // Update status message
             _statusMessage = $"Refueling {_facility.FuelType} ({level:0}%)...";
 
-            // Check if tank is full (within threshold)
-            if (level >= 100f - (AutopilotConstants.FullThresholdUnits / GetMaxCapacity(loco, trainService) * 100f))
+            // Check if tank is full (percentage threshold — avoids the old
+            // absolute-units calculation that varied wildly by tank size)
+            if (level >= AutopilotConstants.FullThresholdPercent)
             {
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: {_facility.FuelType} tank full at {level:F1}%");
                 _phase = Phase.Cleanup;
@@ -379,7 +380,7 @@ namespace Autopilot.Execution
 
             // Progress check: if no fuel has flowed in 30 seconds, the car
             // probably isn't positioned close enough to the loader.
-            if (level > _refuelStartLevel + 1f)
+            if (level > _refuelStartLevel)
             {
                 // Fuel is flowing — reset progress timer
                 _noProgressTimer = 0f;
@@ -532,18 +533,5 @@ namespace Autopilot.Execution
             return industry.Storage.QuantityInStorage(matchingLoad) <= 0f;
         }
 
-        /// <summary>
-        /// Get the max capacity for the fuel type on the fuel car, for full-threshold calculation.
-        /// </summary>
-        private float GetMaxCapacity(BaseLocomotive loco, TrainService trainService)
-        {
-            var fuelCar = trainService.GetFuelCar(loco);
-            var slotIndex = fuelCar.Definition.LoadSlots
-                .FindIndex(s => s.RequiredLoadIdentifier == _facility.FuelType);
-            if (slotIndex < 0)
-                return 1f; // avoid divide-by-zero, won't match anyway
-
-            return fuelCar.Definition.LoadSlots[slotIndex].MaximumCapacity;
-        }
     }
 }

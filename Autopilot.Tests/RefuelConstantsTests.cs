@@ -24,9 +24,9 @@ namespace Autopilot.Tests
         }
 
         [Test]
-        public void FullThreshold_is_25_units()
+        public void FullThreshold_is_100_percent()
         {
-            Assert.AreEqual(25f, AutopilotConstants.FullThresholdUnits);
+            Assert.AreEqual(100f, AutopilotConstants.FullThresholdPercent);
         }
 
         [Test]
