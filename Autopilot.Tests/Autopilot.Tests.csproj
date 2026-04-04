@@ -24,6 +24,10 @@
 
   <!-- Game assemblies — Private=true so they're copied to test output for NUnit to load -->
   <ItemGroup>
+    <Reference Include="UnityModManager">
+      <HintPath>$(RrManagedDir)\UnityModManager\UnityModManager.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(RrManagedDir)\Assembly-CSharp.dll</HintPath>
       <Private>true</Private>
