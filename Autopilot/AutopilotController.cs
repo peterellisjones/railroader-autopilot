@@ -7,8 +7,8 @@ using Game.Events;
 using Model;
 using Autopilot.Execution;
 using Autopilot.Model;
-using Autopilot.Services;
 using Autopilot.Planning;
+using Autopilot.Services;
 
 namespace Autopilot
 {
@@ -20,7 +20,6 @@ namespace Autopilot
         private Dictionary<BaseLocomotive, AutopilotStateMachine> _stateMachines = new Dictionary<BaseLocomotive, AutopilotStateMachine>();
         private Dictionary<BaseLocomotive, Coroutine> _coroutines = new Dictionary<BaseLocomotive, Coroutine>();
         private PickupPlanner _pickupPlanner;
-
         public static AutopilotController Instance { get; private set; }
 
         private void Awake()
@@ -75,7 +74,7 @@ namespace Autopilot
             _coroutines[loco] = StartCoroutine(TickLoop(loco, sm));
         }
 
-        public void StartPickup(string destinationName, bool deliverAfterPickup = false)
+        public void StartPickup(PickupFilter filter, bool deliverAfterPickup = false)
         {
             var loco = _trainService.GetSelectedLocomotive();
             if (loco == null)
@@ -89,7 +88,7 @@ namespace Autopilot
             var sm = new AutopilotStateMachine(_trainService);
             sm.DeliverAfterPickup = deliverAfterPickup;
             _stateMachines[loco] = sm;
-            sm.Start(loco, AutopilotMode.Pickup, destinationName);
+            sm.Start(loco, AutopilotMode.Pickup, filter);
             _coroutines[loco] = StartCoroutine(TickLoop(loco, sm));
         }
 
@@ -119,6 +118,7 @@ namespace Autopilot
         /// <summary>
         /// Get destination names for cars reachable from the selected loco.
         /// Used by the UI to populate the pickup destination dropdown.
+        /// TODO: Move to UI in Task 8 when pickup filter panel is implemented.
         /// </summary>
         public List<string> GetReachableDestinations()
         {

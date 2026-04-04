@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Model;
 using Autopilot.Model;
 using Autopilot.Planning;
@@ -32,10 +33,10 @@ namespace Autopilot.Execution
             _ => AutopilotMode.Delivery
         };
 
-        public string? TargetDestination => Phase switch
+        public PickupFilter? PickupFilter => Phase switch
         {
-            PlanningPhase p => p.TargetDestination,
-            Executing e => e.TargetDestination,
+            PlanningPhase p => p.PickupFilter,
+            Executing e => e.PickupFilter,
             _ => null
         };
 
@@ -58,7 +59,7 @@ namespace Autopilot.Execution
             _refuelPlanner = new RefuelPlanner(trainService);
         }
 
-        public void Start(BaseLocomotive loco, AutopilotMode mode = AutopilotMode.Delivery, string? destinationName = null)
+        public void Start(BaseLocomotive loco, AutopilotMode mode = AutopilotMode.Delivery, PickupFilter? pickupFilter = null)
         {
             _loco = loco;
 
@@ -70,7 +71,7 @@ namespace Autopilot.Execution
                 _trainService.SetHandbrake(car, false);
             _trainService.ConnectAirOnCoupled(loco);
 
-            SetPhase(new PlanningPhase(PlanningContext.Empty, mode, destinationName));
+            SetPhase(new PlanningPhase(PlanningContext.Empty, mode, pickupFilter));
         }
 
         public void Resume(BaseLocomotive loco, SavedAutopilotState savedState)
@@ -85,7 +86,7 @@ namespace Autopilot.Execution
             SetPhase(new PlanningPhase(
                 savedState.Context,
                 savedState.Mode,
-                savedState.TargetDestination,
+                savedState.PickupFilter,
                 savedState.PickupCount));
         }
 
@@ -113,7 +114,7 @@ namespace Autopilot.Execution
             SetPhase(new PlanningPhase(
                 _retryContext ?? PlanningContext.Empty,
                 _retryMode,
-                _retryDestination,
+                _retryPickupFilter,
                 _retryPickupCount));
         }
 
@@ -129,7 +130,7 @@ namespace Autopilot.Execution
         // Retry state preserved when entering Failed
         private PlanningContext? _retryContext;
         private AutopilotMode _retryMode;
-        private string? _retryDestination;
+        private PickupFilter? _retryPickupFilter;
         private int _retryPickupCount;
 
         public void Tick()
@@ -178,7 +179,17 @@ namespace Autopilot.Execution
                     }
 
                     if (exec.Mode == AutopilotMode.Pickup && exec.CurrentAction is PickupAction pa)
+                    {
                         pickupCount += pa.TargetCarCount;
+
+                        // Auto-add to switchlist after coupling
+                        if (exec.PickupFilter?.AutoAddToSwitchlist == true)
+                        {
+                            var carIds = pa.PickedUpCarIds;
+                            if (carIds.Count > 0)
+                                _trainService.AddToSwitchlist(carIds);
+                        }
+                    }
 
                     // Track last refueled fuel type for opportunistic check
                     if (exec.CurrentAction is RefuelAction refuelAction)
@@ -186,7 +197,7 @@ namespace Autopilot.Execution
                     else
                         _lastRefuelFuelType = null;
 
-                    SetPhase(new PlanningPhase(context, exec.Mode, exec.TargetDestination, pickupCount));
+                    SetPhase(new PlanningPhase(context, exec.Mode, exec.PickupFilter, pickupCount));
                     return;
 
                 case ActionFailed failed:
@@ -272,7 +283,7 @@ namespace Autopilot.Execution
                     var completionRefuelAction = TryCreateRefuelAction(_loco, Loader.Settings.completionRefuelThreshold);
                     if (completionRefuelAction != null)
                     {
-                        SetPhase(new Executing(plan, completionRefuelAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                        SetPhase(new Executing(plan, completionRefuelAction, p.Context, p.Mode, p.PickupFilter, p.PickupCount, null));
                         return;
                     }
                 }
@@ -283,7 +294,7 @@ namespace Autopilot.Execution
                     var split = p.Context.PendingSplit;
                     var newContext = p.Context.WithPendingSplit(null);
                     var action = new RecoupleAction(split, _loco, _trainService);
-                    SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
+                    SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
                     return;
                 }
 
@@ -305,7 +316,7 @@ namespace Autopilot.Execution
             var midRunRefuelAction = TryCreateRefuelAction(_loco, Loader.Settings.midRunRefuelThreshold);
             if (midRunRefuelAction != null)
             {
-                SetPhase(new Executing(plan, midRunRefuelAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                SetPhase(new Executing(plan, midRunRefuelAction, p.Context, p.Mode, p.PickupFilter, p.PickupCount, null));
                 return;
             }
 
@@ -316,7 +327,7 @@ namespace Autopilot.Execution
                     $" (couple={step.CoupleTarget?.DisplayName ?? "none"})");
                 var newContext = p.Context.WithClearedSwitches();
                 var action = new DeliveryAction(step, _loco, _trainService);
-                SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, step.DestinationLocation));
+                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, step.DestinationLocation));
                 return;
             }
 
@@ -328,7 +339,7 @@ namespace Autopilot.Execution
                 Loader.Mod.Logger.Log($"Autopilot: action=Recouple {split.DroppedCars.Count} dropped car(s)");
                 var newContext = p.Context.WithPendingSplit(null);
                 var action = new RecoupleAction(split, _loco, _trainService);
-                SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
+                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
                 return;
             }
 
@@ -337,7 +348,7 @@ namespace Autopilot.Execution
                 Loader.Mod.Logger.Log($"Autopilot: action=Runaround, split={plan.Runaround.SplitCar.DisplayName}, " +
                     $"couple={plan.Runaround.CoupleTarget.DisplayName}, reason={plan.Reason}");
                 var action = new RunaroundExecutionAction(plan.Runaround, _loco, _trainService);
-                SetPhase(new Executing(plan, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, plan.Runaround.CoupleLocation.ToDirectedPosition()));
+                SetPhase(new Executing(plan, action, p.Context, p.Mode, p.PickupFilter, p.PickupCount, plan.Runaround.CoupleLocation.ToDirectedPosition()));
                 return;
             }
 
@@ -347,7 +358,7 @@ namespace Autopilot.Execution
                     $"keep tail for {plan.Reason}");
                 var newContext = p.Context.WithPendingSplit(plan.Split);
                 var action = new SplitAction(plan.Split, _loco, _trainService);
-                SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, null));
+                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, null));
                 return;
             }
 
@@ -359,7 +370,7 @@ namespace Autopilot.Execution
             Loader.Mod.Logger.Log($"Autopilot: action=Reposition, reason={plan.Reason}");
             var repositionAction = new RepositionAction(
                 plan.RepositionLocation!.Value, _loco, _trainService, plan.Reason);
-            SetPhase(new Executing(plan, repositionAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, plan.RepositionLocation.Value));
+            SetPhase(new Executing(plan, repositionAction, p.Context, p.Mode, p.PickupFilter, p.PickupCount, plan.RepositionLocation.Value));
         }
 
         private void TickPickupPlanning(PlanningPhase p)
@@ -368,14 +379,14 @@ namespace Autopilot.Execution
             var pickupRefuelAction = TryCreateRefuelAction(_loco, Loader.Settings.midRunRefuelThreshold);
             if (pickupRefuelAction != null)
             {
-                SetPhase(new Executing(null, pickupRefuelAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                SetPhase(new Executing(null, pickupRefuelAction, p.Context, p.Mode, p.PickupFilter, p.PickupCount, null));
                 return;
             }
 
             PickupTarget? target;
             try
             {
-                target = _pickupPlanner!.FindNextPickup(_loco, p.TargetDestination, p.Context.SkippedCars);
+                target = _pickupPlanner!.FindNextPickup(_loco, ExtractDestinationName(p.PickupFilter), p.Context.SkippedCars);
             }
             catch (Exception ex)
             {
@@ -390,7 +401,7 @@ namespace Autopilot.Execution
                 var pickupCompletionRefuel = TryCreateRefuelAction(_loco, Loader.Settings.completionRefuelThreshold);
                 if (pickupCompletionRefuel != null)
                 {
-                    SetPhase(new Executing(null, pickupCompletionRefuel, p.Context, p.Mode, p.TargetDestination, p.PickupCount, null));
+                    SetPhase(new Executing(null, pickupCompletionRefuel, p.Context, p.Mode, p.PickupFilter, p.PickupCount, null));
                     return;
                 }
 
@@ -400,13 +411,13 @@ namespace Autopilot.Execution
                     SetPhase(new PlanningPhase(PlanningContext.Empty, AutopilotMode.Delivery, null));
                     return;
                 }
-                var msg = $"Pickup complete — {p.PickupCount} car(s) collected for {p.TargetDestination}.";
+                var msg = $"Pickup complete — {p.PickupCount} car(s) collected.";
                 SetPhase(new Completed(msg, p.PickupCount));
                 return;
             }
 
             var action = new PickupAction(target, _loco, _trainService);
-            SetPhase(new Executing(null, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, target.CoupleLocation.ToDirectedPosition()));
+            SetPhase(new Executing(null, action, p.Context, p.Mode, p.PickupFilter, p.PickupCount, target.CoupleLocation.ToDirectedPosition()));
         }
 
         private void EnterFailed(string message, AutopilotPhase fromPhase)
@@ -422,24 +433,37 @@ namespace Autopilot.Execution
                 case PlanningPhase pp:
                     _retryContext = pp.Context;
                     _retryMode = pp.Mode;
-                    _retryDestination = pp.TargetDestination;
+                    _retryPickupFilter = pp.PickupFilter;
                     _retryPickupCount = pp.PickupCount;
                     break;
                 case Executing ex:
                     _retryContext = ex.Context;
                     _retryMode = ex.Mode;
-                    _retryDestination = ex.TargetDestination;
+                    _retryPickupFilter = ex.PickupFilter;
                     _retryPickupCount = ex.PickupCount;
                     break;
                 default:
                     _retryContext = PlanningContext.Empty;
                     _retryMode = AutopilotMode.Delivery;
-                    _retryDestination = null;
+                    _retryPickupFilter = null;
                     _retryPickupCount = 0;
                     break;
             }
 
             SetPhase(new Failed(message, lastPlan));
+        }
+
+        /// <summary>
+        /// Temporary bridge: extract a destination name string from a PickupFilter
+        /// for the current FindNextPickup(string) signature. Will be removed when
+        /// Task 6 updates FindNextPickup to accept PickupFilter directly.
+        /// </summary>
+        private string? ExtractDestinationName(PickupFilter? filter)
+        {
+            if (filter == null) return null;
+            if (filter.To.Mode == FilterMode.Destination && filter.To.CheckedItems.Count > 0)
+                return filter.To.CheckedItems.First();
+            return null;
         }
 
         private void SetPhase(AutopilotPhase newPhase)
@@ -452,10 +476,10 @@ namespace Autopilot.Execution
                 switch (newPhase)
                 {
                     case PlanningPhase p:
-                        _trainService.SaveAutopilotState(_loco, p.Mode, p.TargetDestination, p.PickupCount, p.Context, DeliverAfterPickup);
+                        _trainService.SaveAutopilotState(_loco, p.Mode, p.PickupFilter, p.PickupCount, p.Context, DeliverAfterPickup);
                         break;
                     case Executing e:
-                        _trainService.SaveAutopilotState(_loco, e.Mode, e.TargetDestination, e.PickupCount, e.Context, DeliverAfterPickup);
+                        _trainService.SaveAutopilotState(_loco, e.Mode, e.PickupFilter, e.PickupCount, e.Context, DeliverAfterPickup);
                         break;
                     default:
                         // Idle, Completed, Failed — clear saved state so we don't resume

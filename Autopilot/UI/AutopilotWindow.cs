@@ -316,7 +316,16 @@ namespace Autopilot.UI
                         if (canStart)
                         {
                             strip.AddButton("Start Pickup", () =>
-                                { controller.StartPickup(_destinations[_selectedDestinationIndex], _deliverAfterPickup); RebuildPanel(); });
+                                {
+                                    var dest = _destinations[_selectedDestinationIndex];
+                                    var filter = new PickupFilter(
+                                        FilterAxis.Any,
+                                        new FilterAxis(Autopilot.Model.FilterMode.Destination, new HashSet<string> { dest }),
+                                        float.MaxValue,
+                                        autoAddToSwitchlist: false);
+                                    controller.StartPickup(filter, _deliverAfterPickup);
+                                    RebuildPanel();
+                                });
                         }
                     }
                     else
@@ -439,7 +448,7 @@ namespace Autopilot.UI
             // Pickup progress
             if (sm.Mode == AutopilotMode.Pickup)
             {
-                builder.AddLabel($"Collecting cars for: <b>{sm.TargetDestination ?? "?"}</b>");
+                builder.AddLabel($"Collecting cars for: <b>{sm.PickupFilter?.DisplaySummary ?? "?"}</b>");
                 if (sm.PickupCount > 0)
                     builder.AddLabel($"Cars collected: {sm.PickupCount}");
             }

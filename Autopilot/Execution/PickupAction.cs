@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Model;
 using Model.AI;
 using Autopilot.Model;
@@ -19,6 +20,9 @@ namespace Autopilot.Execution
 
         /// <summary>Number of target cars in this pickup (for state machine counting).</summary>
         public int TargetCarCount => _target.TargetCars.Count;
+
+        /// <summary>Car IDs of the target cars in this pickup (for switchlist auto-add).</summary>
+        public List<string> PickedUpCarIds => _target.TargetCars.Select(c => c.id).ToList();
 
         public PickupAction(PickupTarget target, BaseLocomotive loco, TrainService trainService)
         {
