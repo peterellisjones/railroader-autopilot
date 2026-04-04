@@ -17,7 +17,7 @@ namespace Autopilot.Model
         public Car CoupleTarget { get; }
 
         /// <summary>Location for SetWaypointWithCouple.</summary>
-        public DirectedPosition CoupleLocation { get; }
+        public CoupleWaypoint CoupleLocation { get; }
 
         /// <summary>Consecutive target cars from the approach end.</summary>
         public List<Car> TargetCars { get; }
@@ -25,7 +25,7 @@ namespace Autopilot.Model
         /// <summary>Destination name for display.</summary>
         public string DestinationName { get; }
 
-        public PickupTarget(Car coupleTarget, DirectedPosition coupleLocation,
+        public PickupTarget(Car coupleTarget, CoupleWaypoint coupleLocation,
             List<Car> targetCars, string destinationName)
         {
             CoupleTarget = coupleTarget;

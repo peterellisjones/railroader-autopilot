@@ -70,7 +70,7 @@ namespace Autopilot.Services
             }
         }
 
-        public void SetWaypointWithCouple(BaseLocomotive loco, DirectedPosition target, string coupleToCarId)
+        public void SetWaypointWithCouple(BaseLocomotive loco, CoupleWaypoint target, string coupleToCarId)
         {
             var location = target.ToLocation();
             var locationString = Graph.Shared.LocationToString(location);

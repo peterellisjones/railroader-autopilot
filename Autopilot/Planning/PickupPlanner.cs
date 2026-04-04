@@ -196,14 +196,14 @@ namespace Autopilot.Planning
                     endsToTry = new[] { freeEnd };
                 }
 
-                DirectedPosition coupleLocation = default;
+                CoupleWaypoint coupleLocation = default;
                 float distance = float.MaxValue;
                 bool reachable = false;
 
                 foreach (var logicalEnd in endsToTry)
                 {
-                    var coupleLoc = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
-                    var testLoc = coupleLoc.ToLocation();
+                    var coupleWp = Services.CoupleLocationCalculator.GetCoupleLocationForEnd(target, logicalEnd, graph);
+                    var testLoc = coupleWp.ToLocation();
 
                     // Route with actual train length from both loco ends.
                     var ignored = new System.Collections.Generic.HashSet<Car>(coupled);
@@ -227,7 +227,7 @@ namespace Autopilot.Planning
                     Log($"Trying {target.DisplayName} end {logicalEnd}: waypoint on {testLoc.segment?.id}|{testLoc.distance:F1}, dist={routeDist:F0}");
                     if (routeDist < distance)
                     {
-                        coupleLocation = DirectedPosition.FromLocation(testLoc);
+                        coupleLocation = coupleWp;
                         distance = routeDist;
                         reachable = true;
                     }

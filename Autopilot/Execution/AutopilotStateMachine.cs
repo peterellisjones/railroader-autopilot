@@ -202,7 +202,7 @@ namespace Autopilot.Execution
                     var split = p.Context.PendingSplit;
                     var newContext = p.Context.WithPendingSplit(null);
                     var action = new RecoupleAction(split, _loco, _trainService);
-                    SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation));
+                    SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
                     return;
                 }
 
@@ -239,7 +239,7 @@ namespace Autopilot.Execution
                 Loader.Mod.Logger.Log($"Autopilot: action=Recouple {split.DroppedCars.Count} dropped car(s)");
                 var newContext = p.Context.WithPendingSplit(null);
                 var action = new RecoupleAction(split, _loco, _trainService);
-                SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation));
+                SetPhase(new Executing(plan, action, newContext, p.Mode, p.TargetDestination, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
                 return;
             }
 
@@ -248,7 +248,7 @@ namespace Autopilot.Execution
                 Loader.Mod.Logger.Log($"Autopilot: action=Runaround, split={plan.Runaround.SplitCar.DisplayName}, " +
                     $"couple={plan.Runaround.CoupleTarget.DisplayName}, reason={plan.Reason}");
                 var action = new RunaroundExecutionAction(plan.Runaround, _loco, _trainService);
-                SetPhase(new Executing(plan, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, plan.Runaround.CoupleLocation));
+                SetPhase(new Executing(plan, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, plan.Runaround.CoupleLocation.ToDirectedPosition()));
                 return;
             }
 
@@ -300,7 +300,7 @@ namespace Autopilot.Execution
             }
 
             var action = new PickupAction(target, _loco, _trainService);
-            SetPhase(new Executing(null, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, target.CoupleLocation));
+            SetPhase(new Executing(null, action, p.Context, p.Mode, p.TargetDestination, p.PickupCount, target.CoupleLocation.ToDirectedPosition()));
         }
 
         private void EnterFailed(string message, AutopilotPhase fromPhase)

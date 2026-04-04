@@ -15,13 +15,13 @@ namespace Autopilot.Model
         public Car CoupleTarget { get; }
 
         /// <summary>Location at the far end of CoupleTarget — forces AE to route around.</summary>
-        public DirectedPosition CoupleLocation { get; }
+        public CoupleWaypoint CoupleLocation { get; }
 
         /// <summary>Cars being disconnected (need handbrakes).</summary>
         public List<Car> DisconnectedCars { get; }
 
         public RunaroundAction(Car splitCar, Car.LogicalEnd splitEnd, Car coupleTarget,
-            DirectedPosition coupleLocation, List<Car> disconnectedCars)
+            CoupleWaypoint coupleLocation, List<Car> disconnectedCars)
         {
             SplitCar = splitCar;
             SplitEnd = splitEnd;

@@ -17,7 +17,7 @@ namespace Autopilot.Services
         /// <summary>
         /// Returns null if the end faces a buffer stop (end of track).
         /// </summary>
-        public static DirectedPosition GetCoupleLocationForEnd(ICar target, Car.LogicalEnd logicalEnd, Graph graph)
+        public static CoupleWaypoint GetCoupleLocationForEnd(ICar target, Car.LogicalEnd logicalEnd, Graph graph)
         {
             var carEnd = target.LogicalToEnd(logicalEnd);
             var endPos = carEnd == Car.End.F ? target.Front : target.Rear;
@@ -30,7 +30,8 @@ namespace Autopilot.Services
                 offsetLoc = graph.LocationByMoving(endLoc, AutopilotConstants.CouplingOffsetDistance, false, true);
             else
                 offsetLoc = graph.LocationByMoving(endLoc, -AutopilotConstants.CouplingOffsetDistance, false, true).Flipped();
-            return DirectedPosition.FromLocation(offsetLoc);
+            var dp = DirectedPosition.FromLocation(offsetLoc);
+            return new CoupleWaypoint(dp.Segment, dp.DistanceFromA, dp.Facing);
         }
     }
 }

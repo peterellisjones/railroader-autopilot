@@ -25,11 +25,11 @@ namespace Autopilot.Model
         public Car CoupleTarget { get; }
 
         /// <summary>Location for SetWaypointWithCouple (0.5m past couple target).</summary>
-        public DirectedPosition CoupleLocation { get; }
+        public CoupleWaypoint CoupleLocation { get; }
 
         public SplitInfo(Car splitCar, Car.LogicalEnd splitEnd,
             List<Car> droppedCars, DirectedPosition dropLocation,
-            Car coupleTarget, DirectedPosition coupleLocation)
+            Car coupleTarget, CoupleWaypoint coupleLocation)
         {
             SplitCar = splitCar;
             SplitEnd = splitEnd;

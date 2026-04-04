@@ -326,14 +326,11 @@ namespace Autopilot.Planning
             // Don't use ClosestLogicalEndTo (crow-flies).
             var freeEnd = coupleTarget.CoupledTo(Car.LogicalEnd.A) != null
                 ? Car.LogicalEnd.B : Car.LogicalEnd.A;
-            var couplePos = CoupleLocationCalculator.GetCoupleLocationForEnd(
+            var coupleWaypoint = CoupleLocationCalculator.GetCoupleLocationForEnd(
                 new CarAdapter(coupleTarget), freeEnd, graph);
-            var coupleLoc = couplePos.ToLocation();
-
-            var coupleLocation = DirectedPosition.FromLocation(coupleLoc);
 
             return new SplitInfo(splitCar, splitEnd, droppedCars,
-                coupleLocation, coupleTarget, coupleLocation);
+                coupleWaypoint.ToDirectedPosition(), coupleTarget, coupleWaypoint);
         }
     }
 }
