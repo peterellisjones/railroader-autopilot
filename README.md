@@ -10,7 +10,7 @@ A mod for [Railroader](https://store.steampowered.com/app/1689160/Railroader/) t
 - **Loop detection** — finds the nearest passing siding or wye that fits the train for runarounds
 - **Train splitting** — when the train is too long for a siding, splits the train, delivers what it can, then returns to recouple the rest
 - **Smart repositioning** — moves to the nearest loop when a runaround is needed but no loop is available from the current position
-- **Pickup mode** — collect cars from nearby sidings and couple them to your train, filtered by destination; skips cars blocked by other rolling stock
+- **Pickup mode** — collect cars from nearby sidings with flexible filtering by area, industry, destination, or switchlist; supports From/To filters, distance radius, and auto-add to switchlist
 - **Auto-refuel** — monitors fuel/water levels and automatically routes to the nearest facility when low (steam and diesel)
 - **Parking space** — save a waypoint as a locomotive's "parking space" and return to it with one click
 - **Park after delivery** — optionally send the loco to its parking space automatically when deliveries finish
@@ -43,10 +43,18 @@ The autopilot will:
 ### Pickup Mode
 
 1. Select the **Pickup** tab in the Autopilot window
-2. Choose a destination from the dropdown (shows destinations with reachable waybilled cars)
+2. Set filters to find the cars you want:
+   - **Distance slider** — limit how far to search (in feet/miles)
+   - **From** — filter by where cars are: Area, Industry, Destination (siding), or Switchlist
+   - **To** — filter by where cars are going: Area, Industry, Destination, or Switchlist
+   - Check the locations/destinations you want in each column
 3. Click **Start Pickup**
 
-The autopilot will drive to each car, couple it, and continue until all reachable cars for that destination are collected.
+The autopilot will drive to each matching car (nearest first), couple it, and continue until all reachable matching cars are collected. The filter can be adjusted during execution.
+
+**Options:**
+- **Auto-add to switchlist** — automatically adds each car to your crew's switchlist when coupled
+- **Deliver after pickup** — switch to delivery mode after all matching cars are collected
 
 ### Auto-Refuel
 
@@ -96,7 +104,7 @@ The UI shows what the autopilot is doing and why:
 - **Splitting train — dropping 4 car(s)...** — dropping far-end cars to shorten the train
 - **Returning to recouple dropped cars...** — picking up previously dropped cars
 - **Moving to pick up PRR 34826...** — driving to a car for pickup
-- **Collecting cars for: Sylva Building Supply** — pickup mode active
+- **Picking up 5 car(s) within 2.1 mi going to Bryson, Andrews.** — pickup mode summary
 - **Moving to water tower...** — routing to a fuel facility
 - **Refueling water (65%)...** — filling up at a facility
 
