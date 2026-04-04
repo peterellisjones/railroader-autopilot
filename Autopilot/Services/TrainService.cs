@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Game.Messages;
+using Game.State;
 using KeyValue.Runtime;
 using Model;
 using Model.AI;
@@ -513,6 +514,75 @@ namespace Autopilot.Services
                 Loader.Mod.Logger.Log($"Autopilot GetNearbyCars: returning {result.Count} cars");
 
             return result;
+        }
+
+        // --- Switchlist & Crew ---
+
+        private static readonly FieldInfo? SwitchListsField =
+            typeof(SwitchListController).GetField("_switchLists", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        /// <summary>
+        /// Get the trainCrewId for the current player.
+        /// Returns null if no crew is assigned.
+        /// </summary>
+        public string? GetTrainCrewId()
+        {
+            var pm = StateManager.Shared?.PlayersManager;
+            if (pm == null) return null;
+            return pm.TrainCrewIdFor(PlayersManager.PlayerId);
+        }
+
+        /// <summary>
+        /// Get the display name of the current player's train crew.
+        /// Returns null if no crew is assigned.
+        /// </summary>
+        public string? GetTrainCrewName()
+        {
+            var crewId = GetTrainCrewId();
+            if (crewId == null) return null;
+
+            var pm = StateManager.Shared?.PlayersManager;
+            if (pm == null) return null;
+
+            if (pm.TrainCrewForId(crewId, out var crew))
+                return crew.Name;
+            return null;
+        }
+
+        /// <summary>
+        /// Get the car IDs on the current crew's switchlist.
+        /// Returns empty set if no switchlist or crew not found.
+        /// </summary>
+        public HashSet<string> GetSwitchlistCarIds()
+        {
+            var crewId = GetTrainCrewId();
+            if (crewId == null) return new HashSet<string>();
+
+            var slc = OpsController.Shared?.SwitchListController;
+            if (slc == null || SwitchListsField == null) return new HashSet<string>();
+
+            var switchLists = SwitchListsField.GetValue(slc) as System.Collections.IDictionary;
+            if (switchLists == null || !switchLists.Contains(crewId))
+                return new HashSet<string>();
+
+            var list = switchLists[crewId] as List<IOpsCar>;
+            if (list == null) return new HashSet<string>();
+
+            return new HashSet<string>(list.Select(c => c.Id));
+        }
+
+        /// <summary>
+        /// Add cars to the current crew's switchlist.
+        /// </summary>
+        public void AddToSwitchlist(List<string> carIds)
+        {
+            var crewId = GetTrainCrewId();
+            if (crewId == null) return;
+
+            var slc = OpsController.Shared?.SwitchListController;
+            if (slc == null) return;
+
+            slc.ToggleSwitchListCarIds(crewId, carIds, true);
         }
     }
 }
