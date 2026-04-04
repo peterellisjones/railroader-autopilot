@@ -351,14 +351,15 @@ namespace Autopilot.Execution
                 return;
             }
 
-            // Reposition to a loop
+            // Reposition to a loop. Don't mark the loop as visited yet —
+            // the reposition may not fully place the train on the loop
+            // (e.g. long train tail extends past the stem). Let the next
+            // planning cycle re-evaluate the same loop. It will either
+            // succeed at the runaround or reposition again.
             Loader.Mod.Logger.Log($"Autopilot: action=Reposition, reason={plan.Reason}");
-            var repositionContext = p.Context;
-            if (plan.RepositionLoopKey != null)
-                repositionContext = repositionContext.WithVisitedLoop(plan.RepositionLoopKey);
             var repositionAction = new RepositionAction(
                 plan.RepositionLocation!.Value, _loco, _trainService, plan.Reason);
-            SetPhase(new Executing(plan, repositionAction, repositionContext, p.Mode, p.TargetDestination, p.PickupCount, plan.RepositionLocation.Value));
+            SetPhase(new Executing(plan, repositionAction, p.Context, p.Mode, p.TargetDestination, p.PickupCount, plan.RepositionLocation.Value));
         }
 
         private void TickPickupPlanning(PlanningPhase p)

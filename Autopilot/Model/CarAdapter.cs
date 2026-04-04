@@ -41,8 +41,12 @@ namespace Autopilot.Model
 
         public ICar? CoupledTo(Car.LogicalEnd end)
         {
-            var coupled = _car.CoupledTo(end);
-            return coupled != null ? new CarAdapter(coupled) : null;
+            try
+            {
+                var coupled = _car.CoupledTo(end);
+                return coupled != null ? new CarAdapter(coupled) : null;
+            }
+            catch { return null; }
         }
 
         public bool IsCoupled(Car.LogicalEnd end)

@@ -50,13 +50,19 @@ namespace Autopilot.Planning
             // group.Cars is ordered tail-to-loco. Cars to keep are at the inner end
             int splitIdx = group.Cars.Count - 1;
 
-            // Skip locos/tenders
+            // Skip locos/tenders — these always stay with the loco
+            int tendersSkipped = 0;
             while (splitIdx > 0 && group.Cars[splitIdx].IsLocoOrTender)
+            {
                 splitIdx--;
+                tendersSkipped++;
+            }
 
-            // Skip the deliverable cars (they stay with the loco)
+            // Skip the freight cars to keep (carsToKeep includes tenders,
+            // but we already skipped those above)
+            int freightToKeep = carsToKeep - tendersSkipped;
             int kept = 0;
-            while (splitIdx >= 0 && kept < carsToKeep)
+            while (splitIdx >= 0 && kept < freightToKeep)
             {
                 splitIdx--;
                 kept++;

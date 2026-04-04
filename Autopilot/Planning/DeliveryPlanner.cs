@@ -122,6 +122,32 @@ namespace Autopilot.Planning
             // Single loop status check — used for both runaround feasibility
             // and reposition decisions. CanRunaround = entire consist on loop.
             var loopStatus = _checker.GetLoopStatus(loco);
+
+            // The segment-based "on loop" check can fail when the LoopFinder's
+            // branch segment list is incomplete (missing segments that are
+            // physically part of the loop path). Fall back to route distance:
+            // if GetRepositionLocation finds the train is already very close
+            // to a loop (routeDist < trainLength), treat it as on-loop.
+            if (!loopStatus.CanRunaround)
+            {
+                float trainLen = _trainService.GetTrainLength(loco);
+                var (nearbyLoc, nearbyLoopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys);
+                if (nearbyLoc.HasValue)
+                {
+                    float nearbyDist = _checker.RouteChecker.GraphDistanceToLoco(loco, nearbyLoc.Value)?.Distance ?? float.MaxValue;
+                    if (nearbyDist < trainLen)
+                    {
+                        var adapter = new TrackGraph.GameGraphAdapter();
+                        var nearbyLoop = _checker.LoopValidator.FindFittingLoop(loco, adapter, visitedSwitches, new HashSet<string>());
+                        if (nearbyLoop != null)
+                        {
+                            Log($"Loop status: segment check failed but train is {nearbyDist:F0}m from loop {nearbyLoop.SwitchAId}↔{nearbyLoop.SwitchBId} — treating as on-loop");
+                            loopStatus = LoopStatus.OnLoop(nearbyLoop);
+                        }
+                    }
+                }
+            }
+
             Log($"Loop status: canRunaround={loopStatus.CanRunaround}" +
                 (loopStatus.Loop != null ? $", loop={loopStatus.Loop.SwitchAId}↔{loopStatus.Loop.SwitchBId}" : ""));
 
