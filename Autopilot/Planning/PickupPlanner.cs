@@ -271,8 +271,32 @@ namespace Autopilot.Planning
                                 approachFromEndA = testLoc.distance < carCenter;
                             }
 
+                            // Verify the route enters the terminal segment from
+                            // the correct side. RouteSearch ignores coupled cars,
+                            // so it may find a route that enters from the far end —
+                            // requiring the loco to pass through the chain itself.
+                            if (approachFromEndA.HasValue && routeSegs.Count >= 2)
+                            {
+                                var prevSeg = routeSegs[routeSegs.Count - 2];
+                                var termSeg = routeSegs[routeSegs.Count - 1];
+                                if (termSeg.id == terminalSegId)
+                                {
+                                    var sharedNode = Services.TrackWalker.FindSharedNode(prevSeg, termSeg);
+                                    if (sharedNode != null)
+                                    {
+                                        bool entersFromEndA = (termSeg.NodeForEnd(TrackSegment.End.A) == sharedNode);
+                                        if (entersFromEndA != approachFromEndA.Value)
+                                        {
+                                            Log($"  Route to {target.DisplayName} enters {terminalSegId} from wrong end");
+                                            routeFound = false;
+                                        }
+                                    }
+                                }
+                            }
+
                             foreach (var seg in routeSegs)
                             {
+                                if (!routeFound) break;
                                 if (segmentToCars.TryGetValue(seg.id, out var carsOnSeg))
                                 {
                                     foreach (var blockCar in carsOnSeg)
