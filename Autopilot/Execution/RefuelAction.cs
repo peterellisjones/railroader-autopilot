@@ -262,12 +262,15 @@ namespace Autopilot.Execution
         /// </summary>
         private string? FindAndActivateLoader()
         {
+            // Match by RegisteredId — stable across floating-origin shifts.
+            // World positions change as the game's coordinate origin moves,
+            // but RegisteredId is a persistent unique identifier.
             var loaders = UnityEngine.Object.FindObjectsOfType<CarLoadTargetLoader>();
             CarLoadTargetLoader? matchedLoader = null;
 
             foreach (var loader in loaders)
             {
-                if (loader.transform.position == _facility.WorldPosition)
+                if (loader.keyValueObject.RegisteredId == _facility.LoaderRegisteredId)
                 {
                     matchedLoader = loader;
                     break;
@@ -275,22 +278,7 @@ namespace Autopilot.Execution
             }
 
             if (matchedLoader == null)
-            {
-                // Fallback: distance-based match
-                float bestDist = float.MaxValue;
-                foreach (var loader in loaders)
-                {
-                    float dist = Vector3.Distance(loader.transform.position, _facility.WorldPosition);
-                    if (dist < 1f && dist < bestDist)
-                    {
-                        bestDist = dist;
-                        matchedLoader = loader;
-                    }
-                }
-            }
-
-            if (matchedLoader == null)
-                return $"Cannot find loader for {_facility.FuelType} at facility position.";
+                return $"Cannot find loader for {_facility.FuelType} (id={_facility.LoaderRegisteredId}).";
 
             // Find matching sequencer by RegisteredId
             var sequencers = UnityEngine.Object.FindObjectsOfType<CarLoaderSequencer>();

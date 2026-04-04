@@ -80,7 +80,7 @@ namespace Autopilot.Planning
                 _cachedFacilities.Add(new FacilityInfo(
                     loadId,
                     DirectedPosition.FromLocation(loc),
-                    loader.transform.position,
+                    loader.keyValueObject.RegisteredId,
                     industryId));
             }
 

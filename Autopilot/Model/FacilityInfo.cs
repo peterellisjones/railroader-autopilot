@@ -1,5 +1,4 @@
 using Track;
-using UnityEngine;
 
 namespace Autopilot.Model
 {
@@ -14,8 +13,12 @@ namespace Autopilot.Model
         /// <summary>Track position of the loader.</summary>
         public DirectedPosition Location { get; }
 
-        /// <summary>World position of the loader (for matching to CarLoaderSequencer).</summary>
-        public Vector3 WorldPosition { get; }
+        /// <summary>
+        /// Stable registered ID of the CarLoadTargetLoader's KeyValueObject.
+        /// Used to re-find the loader and its matching CarLoaderSequencer at activation time.
+        /// Unlike world position, this ID is not affected by floating-origin shifts.
+        /// </summary>
+        public string LoaderRegisteredId { get; }
 
         /// <summary>Graph distance from the locomotive to this facility. Set during selection.</summary>
         public float Distance { get; set; }
@@ -26,11 +29,11 @@ namespace Autopilot.Model
         /// </summary>
         public string? IndustryId { get; }
 
-        public FacilityInfo(string fuelType, DirectedPosition location, Vector3 worldPosition, string? industryId)
+        public FacilityInfo(string fuelType, DirectedPosition location, string loaderRegisteredId, string? industryId)
         {
             FuelType = fuelType;
             Location = location;
-            WorldPosition = worldPosition;
+            LoaderRegisteredId = loaderRegisteredId;
             IndustryId = industryId;
         }
     }
