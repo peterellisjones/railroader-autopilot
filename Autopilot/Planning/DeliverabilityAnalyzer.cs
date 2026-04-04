@@ -134,13 +134,11 @@ namespace Autopilot.Planning
                     if (nextCar.Waybill == null)
                         break;
                     var nextDest = nextCar.Waybill.Value.Destination;
-                    DirectedPosition nextDestLoc;
-                    try
-                    {
-                        nextDestLoc = _destinationSelector.GetDestinationLocation(nextDest, loco);
-                    }
-                    catch { break; }
-                    if (nextDestLoc.Segment == null || nextDestLoc.Segment != destLocation.Segment)
+                    // Check same destination by identity, not by which segment
+                    // GetDestinationLocation returns — that returns the global
+                    // best candidate which may be on a different span/segment
+                    // than the one selected for this delivery.
+                    if (nextDest.Identifier != destination.Identifier)
                         break;
                     // Previous car now needs its full length plus coupling gap
                     // (it's no longer the last). Next car only needs MinOverlap.
