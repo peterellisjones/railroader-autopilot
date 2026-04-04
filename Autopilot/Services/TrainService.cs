@@ -4,6 +4,8 @@ using Game.Messages;
 using KeyValue.Runtime;
 using Model;
 using Model.AI;
+using Model.Definition;
+using Model.Definition.Data;
 using Model.Ops;
 using System.Reflection;
 using Track;
@@ -24,6 +26,7 @@ namespace Autopilot.Services
         private const string PickupCountKey = "autopilot.pickupCount";
         private const string ContextKey = "autopilot.context";
         private const string DeliverAfterPickupKey = "autopilot.deliverAfterPickup";
+        private const string AutoRefuelEnabledKey = "autopilot.autoRefuelEnabled";
 
         // Per-plan-cycle caches — cleared by DeliveryPlanner.BuildPlan()
         private List<Car>? _cachedCoupled;
@@ -199,6 +202,64 @@ namespace Autopilot.Services
         public void SetParkAfterDelivery(BaseLocomotive loco, bool enabled)
         {
             loco.KeyValueObject[ParkAfterDeliveryKey] = Value.Bool(enabled);
+        }
+
+        public bool GetAutoRefuelEnabled(BaseLocomotive loco)
+        {
+            var value = loco.KeyValueObject[AutoRefuelEnabledKey];
+            // Default to true if not explicitly set
+            return value.IsNull || value.BoolValue;
+        }
+
+        public void SetAutoRefuelEnabled(BaseLocomotive loco, bool enabled)
+        {
+            loco.KeyValueObject[AutoRefuelEnabledKey] = Value.Bool(enabled);
+        }
+
+        /// <summary>
+        /// Returns the car that holds fuel for this locomotive.
+        /// For steam: the tender. For diesel: the locomotive itself.
+        /// </summary>
+        public Car GetFuelCar(BaseLocomotive loco)
+        {
+            if (loco.Archetype == CarArchetype.LocomotiveSteam)
+                return Patches.PatchSteamLocomotive.FuelCar(loco);
+            return (Car)loco;
+        }
+
+        /// <summary>
+        /// Returns the fuel types this locomotive needs.
+        /// </summary>
+        public static List<string> GetFuelTypes(BaseLocomotive loco)
+        {
+            if (loco.Archetype == CarArchetype.LocomotiveSteam)
+                return new List<string> { "water", "coal" };
+            if (loco.Archetype == CarArchetype.LocomotiveDiesel)
+                return new List<string> { "diesel-fuel" };
+            return new List<string>();
+        }
+
+        /// <summary>
+        /// Returns fill percentage (0-100) for a specific fuel type on this locomotive.
+        /// Returns 100 if the fuel type is not found (safe default — won't trigger refuel).
+        /// </summary>
+        public float GetFuelLevel(BaseLocomotive loco, string fuelType)
+        {
+            var fuelCar = GetFuelCar(loco);
+            var slotIndex = fuelCar.Definition.LoadSlots.FindIndex(s => s.RequiredLoadIdentifier == fuelType);
+            if (slotIndex < 0)
+                return 100f;
+
+            var slot = fuelCar.Definition.LoadSlots[slotIndex];
+            if (slot.MaximumCapacity <= 0)
+                return 100f;
+
+            var rawValue = fuelCar.KeyValueObject[string.Format("load.{0}", slotIndex)];
+            var loadInfo = CarLoadInfo.FromPropertyValue(rawValue);
+            if (loadInfo == null)
+                return 100f;
+
+            return (float)(loadInfo.Value.Quantity / slot.MaximumCapacity * 100.0);
         }
 
         public void SaveAutopilotState(BaseLocomotive loco, AutopilotMode mode,
