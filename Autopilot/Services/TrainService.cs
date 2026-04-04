@@ -264,13 +264,13 @@ namespace Autopilot.Services
         }
 
         public void SaveAutopilotState(BaseLocomotive loco, AutopilotMode mode,
-            string? targetDestination, int pickupCount, PlanningContext context,
+            PickupFilter? pickupFilter, int pickupCount, PlanningContext context,
             bool deliverAfterPickup)
         {
             loco.KeyValueObject[ActiveKey] = Value.Bool(true);
             loco.KeyValueObject[ModeKey] = Value.String(mode.ToString());
-            loco.KeyValueObject[TargetDestinationKey] = targetDestination != null
-                ? Value.String(targetDestination) : Value.Null();
+            loco.KeyValueObject[TargetDestinationKey] = pickupFilter != null
+                ? Value.String(pickupFilter.Serialize()) : Value.Null();
             loco.KeyValueObject[PickupCountKey] = Value.Int(pickupCount);
             loco.KeyValueObject[ContextKey] = Value.String(context.Serialize());
             loco.KeyValueObject[DeliverAfterPickupKey] = Value.Bool(deliverAfterPickup);
@@ -298,7 +298,24 @@ namespace Autopilot.Services
                 System.Enum.TryParse(modeVal.StringValue, out mode);
 
             var destVal = loco.KeyValueObject[TargetDestinationKey];
-            string? targetDestination = destVal.IsNull ? null : destVal.StringValue;
+            PickupFilter? pickupFilter = null;
+            if (!destVal.IsNull)
+            {
+                var destStr = destVal.StringValue;
+                // Backwards compatibility: if the stored value doesn't look like JSON,
+                // it's an old-format destination name string. Convert it.
+                if (!string.IsNullOrEmpty(destStr) && !destStr.StartsWith("{"))
+                {
+                    pickupFilter = new PickupFilter(
+                        FilterAxis.Any,
+                        new FilterAxis(FilterMode.Destination, new System.Collections.Generic.HashSet<string> { destStr }),
+                        float.MaxValue, false);
+                }
+                else
+                {
+                    pickupFilter = PickupFilter.Deserialize(destStr);
+                }
+            }
 
             var pickupVal = loco.KeyValueObject[PickupCountKey];
             int pickupCount = pickupVal.IsNull ? 0 : pickupVal.IntValue;
@@ -325,7 +342,7 @@ namespace Autopilot.Services
             var deliverAfterVal = loco.KeyValueObject[DeliverAfterPickupKey];
             bool deliverAfterPickup = !deliverAfterVal.IsNull && deliverAfterVal.BoolValue;
 
-            return new SavedAutopilotState(mode, targetDestination, pickupCount, context, deliverAfterPickup);
+            return new SavedAutopilotState(mode, pickupFilter, pickupCount, context, deliverAfterPickup);
         }
 
         public bool IsWaypointMode(BaseLocomotive loco)

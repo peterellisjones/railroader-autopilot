@@ -12,7 +12,7 @@ namespace Autopilot.Execution
         public override string StatusMessage => "Idle";
     }
 
-    public sealed record PlanningPhase(PlanningContext Context, AutopilotMode Mode, string? TargetDestination, int PickupCount = 0)
+    public sealed record PlanningPhase(PlanningContext Context, AutopilotMode Mode, PickupFilter? PickupFilter, int PickupCount = 0)
         : AutopilotPhase
     {
         public override string StatusMessage => "Planning next move...";
@@ -23,7 +23,7 @@ namespace Autopilot.Execution
         IAction CurrentAction,
         PlanningContext Context,
         AutopilotMode Mode,
-        string? TargetDestination,
+        PickupFilter? PickupFilter,
         int PickupCount,
         DirectedPosition? CurrentWaypoint)
         : AutopilotPhase
