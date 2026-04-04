@@ -2,8 +2,11 @@ using System;
 using System.Linq;
 using Game.Messages;
 using Game.State;
+using KeyValue.Runtime;
 using Model;
+using Model.AI;
 using Model.Ops;
+using UI.EngineControls;
 using Model.Ops.Definition;
 using RollingStock;
 using Track;
@@ -32,6 +35,9 @@ namespace Autopilot.Execution
         private string _statusMessage;
         private string? _initError;
 
+        // Speed state — restore original speed after refuel approach
+        private int _previousMaxSpeed;
+
         // Loader state — resolved once when we start refueling
         private CarLoaderSequencer? _sequencer;
         private bool _loaderActivated;
@@ -49,10 +55,19 @@ namespace Autopilot.Execution
 
             try
             {
+                // Save original max speed before overriding for slow approach
+                var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
+                _previousMaxSpeed = persistence.Orders.MaxSpeedMph;
+
                 trainService.SetWaypoint(loco, facility.Location);
+
+                // Override AE speed to approach speed for slow approach
+                var helper = new AutoEngineerOrdersHelper(loco, persistence);
+                helper.SetOrdersValue(null, null, AutopilotConstants.RefuelApproachSpeedMph, null, null);
+
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: moving to {facility.FuelType} facility " +
                     $"at {facility.Location.Segment?.id}|{facility.Location.DistanceFromA:F1}, " +
-                    $"distance={facility.Distance:F0}m");
+                    $"distance={facility.Distance:F0}m, approach speed={AutopilotConstants.RefuelApproachSpeedMph}mph");
             }
             catch (Exception ex)
             {
@@ -120,20 +135,30 @@ namespace Autopilot.Execution
             var loaderLoc = _facility.Location.ToLocation();
             var graph = Graph.Shared;
 
-            graph.TryFindDistance(fuelCar.LocationF, loaderLoc, out float distF, out _);
-            graph.TryFindDistance(fuelCar.LocationR, loaderLoc, out float distR, out _);
-            float minDist = Math.Min(distF, distR);
+            bool foundF = graph.TryFindDistance(fuelCar.LocationF, loaderLoc, out float distF, out _);
+            bool foundR = graph.TryFindDistance(fuelCar.LocationR, loaderLoc, out float distR, out _);
+
+            if (!foundF && !foundR)
+            {
+                // Can't determine distance — assume close enough, proceed to refuel
+                Loader.Mod.Logger.Log($"Autopilot RefuelAction: TryFindDistance failed for both ends " +
+                    $"of fuel car {fuelCar.DisplayName}, assuming close enough");
+                return TransitionToRefueling(loco, trainService);
+            }
+
+            float minDist = float.MaxValue;
+            if (foundF) minDist = Math.Min(minDist, distF);
+            if (foundR) minDist = Math.Min(minDist, distR);
 
             Loader.Mod.Logger.Log($"Autopilot RefuelAction: fuel car {fuelCar.DisplayName} " +
-                $"distance to loader: F={distF:F1}m R={distR:F1}m min={minDist:F1}m");
+                $"distance to loader: F={distF:F1}m(found={foundF}) R={distR:F1}m(found={foundR}) min={minDist:F1}m");
 
             if (minDist > 3f)
             {
-                // Nudge the train to better position the fuel car
-                // Determine direction: move toward whichever end of the loco is closer to the loader
-                graph.TryFindDistance(loco.LocationF, loaderLoc, out float locoDistF, out _);
-                graph.TryFindDistance(loco.LocationR, loaderLoc, out float locoDistR, out _);
-                bool goForward = locoDistF < locoDistR;
+                // Nudge the train to better position the fuel car.
+                // Direction: the fuel car's closer end tells us which way to move.
+                // If fuelCar.LocationF is closer to the loader, move the train toward F (forward).
+                bool goForward = foundF && (!foundR || distF < distR);
 
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: nudging {minDist:F1}m " +
                     $"(forward={goForward}) to align fuel car with loader");
@@ -215,6 +240,12 @@ namespace Autopilot.Execution
         private ActionOutcome TickCleanup(BaseLocomotive loco, TrainService trainService)
         {
             DeactivateLoader();
+
+            // Restore original max speed before stopping
+            var persistence = new AutoEngineerPersistence(loco.KeyValueObject);
+            var helper = new AutoEngineerOrdersHelper(loco, persistence);
+            helper.SetOrdersValue(null, null, _previousMaxSpeed, null, null);
+
             trainService.StopAE(loco);
 
             float level = trainService.GetFuelLevel(loco, _facility.FuelType);
@@ -329,7 +360,7 @@ namespace Autopilot.Execution
             }
 
             var matchingLoad = industry.Storage.Loads()
-                .FirstOrDefault(l => l.name == _facility.FuelType);
+                .FirstOrDefault(l => l.id == _facility.FuelType);
 
             if (matchingLoad == null)
             {

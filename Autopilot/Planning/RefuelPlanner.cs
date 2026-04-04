@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Model;
+using Model.Ops;
 using RollingStock;
 using Track;
 using Track.Search;
@@ -106,7 +107,9 @@ namespace Autopilot.Planning
                 f.Distance = route?.Distance ?? float.MaxValue;
             }
 
-            var reachable = allFacilities.Where(f => f.Distance < float.MaxValue).ToList();
+            var reachable = allFacilities
+                .Where(f => f.Distance < float.MaxValue && !IsFacilityDepleted(f))
+                .ToList();
             if (reachable.Count == 0)
                 return null;
 
@@ -221,7 +224,8 @@ namespace Autopilot.Planning
                 foreach (var f in facilities)
                 {
                     var route = _trainService.GraphDistanceToLoco(loco, f.Location);
-                    if (route != null && route.Value.Distance <= AutopilotConstants.NearbyFacilityDistanceMeters)
+                    if (route != null && route.Value.Distance <= AutopilotConstants.NearbyFacilityDistanceMeters
+                        && !IsFacilityDepleted(f))
                     {
                         f.Distance = route.Value.Distance;
                         return f;
@@ -238,6 +242,28 @@ namespace Autopilot.Planning
             if (types.Contains("water")) return "water";
             if (types.Contains("coal")) return "coal";
             return types[0];
+        }
+
+        /// <summary>
+        /// Check if a facility's industry storage is empty (no fuel to dispense).
+        /// Water towers (null IndustryId) are considered infinite — always returns false.
+        /// </summary>
+        private bool IsFacilityDepleted(FacilityInfo facility)
+        {
+            if (facility.IndustryId == null)
+                return false; // Water towers are infinite
+
+            var industry = OpsController.Shared?.IndustryForId(facility.IndustryId);
+            if (industry == null)
+                return false;
+
+            var matchingLoad = industry.Storage.Loads()
+                .FirstOrDefault(l => l.id == facility.FuelType);
+
+            if (matchingLoad == null)
+                return true;
+
+            return industry.Storage.QuantityInStorage(matchingLoad) <= 0f;
         }
     }
 }
