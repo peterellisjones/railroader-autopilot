@@ -14,6 +14,10 @@ namespace Autopilot
         [Header("Timeouts")]
         [Draw("Stuck timeout (seconds)")] public float stuckTimeoutSeconds = 60f;
 
+        [Header("Auto-Refuel")]
+        [Draw("Mid-run refuel threshold (%)")] public int midRunRefuelThreshold = 20;
+        [Draw("Completion refuel threshold (%)")] public int completionRefuelThreshold = 50;
+
         [Header("Debug")]
         [Draw("Verbose logging")] public bool verboseLogging = false;
 
