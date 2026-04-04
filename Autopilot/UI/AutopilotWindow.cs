@@ -343,6 +343,37 @@ namespace Autopilot.UI
                 }).Disable(!hasActiveWaypoint);
             });
 
+            // Refuel controls on their own row
+            builder.ButtonStrip(strip =>
+            {
+                strip.AddButton("Refuel Now", () =>
+                {
+                    var controller = AutopilotController.Instance;
+                    if (controller != null)
+                    {
+                        var currentSm = controller.GetStateMachineForSelected();
+                        if (currentSm != null && currentSm.Phase is not (Idle or Completed or Failed))
+                        {
+                            // Autopilot is running — request refuel on next planning tick
+                            currentSm.RequestRefuel();
+                        }
+                        else
+                        {
+                            // Autopilot is idle — start a refuel-only run
+                            controller.StartRefuel();
+                        }
+                        RebuildPanel();
+                    }
+                }).Disable(sm != null && sm.Phase is Executing e && e.CurrentAction is RefuelAction)
+                  .Tooltip("Refuel Now", "Route to the nearest fuel facility and refuel immediately");
+            });
+
+            builder.AddFieldToggle("Refuel when low",
+                () => TrainSvc.GetAutoRefuelEnabled(loco),
+                (val) => TrainSvc.SetAutoRefuelEnabled(loco, val))
+                .Tooltip("Auto-Refuel",
+                    "Automatically refuel when fuel/water drops below threshold (configure in mod settings)");
+
             // Parking buttons on their own row
             var parkWpString = TrainSvc.GetCurrentWaypointLocationString(loco);
             bool parkHasWaypoint = parkWpString != null;

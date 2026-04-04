@@ -94,6 +94,29 @@ namespace Autopilot
         }
 
         /// <summary>
+        /// Start a refuel-only run: enter planning with refuel flag set,
+        /// skip delivery/pickup logic, just find facility and refuel.
+        /// </summary>
+        public void StartRefuel()
+        {
+            var loco = _trainService.GetSelectedLocomotive();
+            if (loco == null)
+            {
+                Loader.Mod.Logger.Log("Autopilot: No locomotive selected.");
+                return;
+            }
+
+            // Stop existing autopilot for this loco if running
+            StopAutopilot(loco);
+
+            var sm = new AutopilotStateMachine(_trainService);
+            sm.RequestRefuel();
+            _stateMachines[loco] = sm;
+            sm.Start(loco);
+            _coroutines[loco] = StartCoroutine(TickLoop(loco, sm));
+        }
+
+        /// <summary>
         /// Get destination names for cars reachable from the selected loco.
         /// Used by the UI to populate the pickup destination dropdown.
         /// </summary>
