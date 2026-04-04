@@ -484,13 +484,33 @@ namespace Autopilot.Services
         {
             var coupled = new HashSet<Car>(GetCoupled(loco));
             var result = new List<Car>();
+            var verbose = Loader.Settings?.verboseLogging == true;
+
+            if (verbose)
+                Loader.Mod.Logger.Log($"Autopilot GetNearbyCars: total cars in world = {TrainController.Shared.Cars.Count}, coupled = {coupled.Count}");
 
             foreach (var car in TrainController.Shared.Cars)
             {
-                if (!coupled.Contains(car) && car.LocationA.segment != null
-                    && car.gameObject.activeInHierarchy)
+                if (coupled.Contains(car)) continue;
+
+                if (verbose)
+                {
+                    var pos = car.transform.position;
+                    Loader.Mod.Logger.Log($"Autopilot GetNearbyCars: [{car.DisplayName}] " +
+                        $"bardo=\"{car.Bardo ?? ""}\" isInBardo={car.IsInBardo} " +
+                        $"isVisible={car.IsVisible} " +
+                        $"activeInHierarchy={car.gameObject.activeInHierarchy} " +
+                        $"segA={car.LocationA.segment?.id ?? "null"} " +
+                        $"pos=({pos.x:F0},{pos.y:F0},{pos.z:F0})");
+                }
+
+                if (car.LocationA.segment != null && car.gameObject.activeInHierarchy
+                    && !car.IsInBardo)
                     result.Add(car);
             }
+
+            if (verbose)
+                Loader.Mod.Logger.Log($"Autopilot GetNearbyCars: returning {result.Count} cars");
 
             return result;
         }
