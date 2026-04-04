@@ -15,7 +15,7 @@ namespace Autopilot.Planning
         private readonly TrainService _trainService;
         private readonly RouteChecker _routeChecker;
 
-        private Dictionary<string, List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)>>? _destCache;
+        private Dictionary<string, List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)>>? _destCache;
 
         public void ClearCache()
         {
@@ -35,9 +35,9 @@ namespace Autopilot.Planning
         ///   3. Spans with pending-waybill cars (avoid blocking their exit)
         /// Within each tier, sorted by distance (closest first).
         /// </summary>
-        public List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)> GetDestinationCandidates(OpsCarPosition destination, BaseLocomotive loco)
+        public List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)> GetDestinationCandidates(OpsCarPosition destination, BaseLocomotive loco)
         {
-            _destCache ??= new Dictionary<string, List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)>>();
+            _destCache ??= new Dictionary<string, List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)>>();
             if (_destCache.TryGetValue(destination.Identifier, out var cached))
                 return cached;
 
@@ -45,7 +45,7 @@ namespace Autopilot.Planning
             var coupled = new HashSet<Car>(_trainService.GetCoupled(loco));
 
             // priority: 0 = completed cars (best), 1 = empty, 2 = pending cars (avoid)
-            var candidates = new List<(DirectedPosition loc, float dist, int priority, Car coupleTo, float availableSpace, int spanIndex)>();
+            var candidates = new List<(DirectedPosition loc, float dist, int priority, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)>();
 
             Loader.Mod.Logger.Log($"Autopilot GetDestinationCandidates: {destination.DisplayName} has {destination.Spans.Length} span(s)");
             for (int spanIdx = 0; spanIdx < destination.Spans.Length; spanIdx++)
@@ -64,6 +64,20 @@ namespace Autopilot.Planning
                 var spanSegIds = GetSpanSegmentIds(lower, upper, graph);
                 if (Loader.Settings?.verboseLogging == true)
                     Loader.Mod.Logger.Log($"  span segments: [{string.Join(", ", spanSegIds)}]");
+
+                // Compute the span boundary once per span — used for approach analysis.
+                // Prefer lower bound; fall back to upper if lower is null.
+                SpanBoundary spanApproach;
+                if (lower != null)
+                {
+                    var lowerPos = DirectedPosition.FromLocation(lower.Value);
+                    spanApproach = new SpanBoundary(lowerPos.Segment, lowerPos.DistanceFromA, lowerPos.Facing);
+                }
+                else
+                {
+                    var upperPos = DirectedPosition.FromLocation(upper.Value);
+                    spanApproach = new SpanBoundary(upperPos.Segment, upperPos.DistanceFromA, upperPos.Facing);
+                }
 
                 // Find existing cars on this span and compute occupied space.
                 var carsOnSpan = new List<Car>();
@@ -128,7 +142,7 @@ namespace Autopilot.Planning
                     var couplePos = DirectedPosition.FromLocation(coupleLoc);
                     int priority = hasPendingWaybill ? 2 : 0;
                     float dist = System.Math.Min(dA, dB);
-                    candidates.Add((couplePos, dist, priority, nearestCar, availableSpace, spanIdx));
+                    candidates.Add((couplePos, dist, priority, nearestCar, availableSpace, spanIdx, spanApproach));
                 }
 
                 // Also offer span endpoints as empty-span candidates
@@ -140,7 +154,7 @@ namespace Autopilot.Planning
                 foreach (var endpoint in endpoints)
                 {
                     float dist = _routeChecker.GraphDistanceToLoco(loco, endpoint)?.Distance ?? float.MaxValue;
-                    candidates.Add((endpoint, dist, 1, null, availableSpace, spanIdx));
+                    candidates.Add((endpoint, dist, 1, null, availableSpace, spanIdx, spanApproach));
                 }
             }}
 
@@ -151,7 +165,7 @@ namespace Autopilot.Planning
                     return a.priority.CompareTo(b.priority);
                 return a.dist.CompareTo(b.dist);
             });
-            var result = candidates.ConvertAll(c => (c.loc, c.coupleTo, c.availableSpace, c.spanIndex));
+            var result = candidates.ConvertAll(c => (c.loc, c.coupleTo, c.availableSpace, c.spanIndex, c.approachTarget));
             _destCache[destination.Identifier] = result;
             return result;
         }

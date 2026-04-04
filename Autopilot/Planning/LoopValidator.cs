@@ -217,7 +217,7 @@ namespace Autopilot.Planning
         public (DirectedPosition? location, string? loopKey) GetRepositionLocation(
             BaseLocomotive loco, IEnumerable<string>? visitedSwitches,
             IEnumerable<string>? visitedLoopKeys = null,
-            List<DirectedPosition>? deliveryDestinations = null)
+            List<SpanBoundary>? deliveryDestinations = null)
         {
             // Try multiple loops and pick the one with the shortest route distance.
             // The loop finder ranks by BFS graph distance, but a loop that's close
@@ -254,7 +254,7 @@ namespace Autopilot.Planning
 
         private (DirectedPosition waypoint, float routeDist, string loopKey, string desc)?
             EvaluateLoopForReposition(BaseLocomotive loco, LoopInfo loop, GameGraphAdapter adapter,
-            List<DirectedPosition>? deliveryDestinations = null)
+            List<SpanBoundary>? deliveryDestinations = null)
         {
             float trainLength = _trainService.GetTrainLength(loco);
 

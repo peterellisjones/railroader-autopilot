@@ -32,7 +32,7 @@ namespace Autopilot.Planning
         /// outward/inward ends, so tailFacesDest and tailLeads are computed
         /// from the correct post-runaround position.
         /// </summary>
-        public bool CheckApproachDirection(BaseLocomotive loco, CarGroup group, DirectedPosition destLocation)
+        public bool CheckApproachDirection(BaseLocomotive loco, CarGroup group, SpanBoundary destLocation)
         {
             var graph = Graph.Shared;
             var heuristic = new HeuristicCosts
@@ -160,7 +160,7 @@ namespace Autopilot.Planning
         /// and checks if any consist segment is on the path. This handles
         /// multi-segment spans where the train is between the endpoint segments.
         /// </summary>
-        public static bool IsConsistWithinSpan(BaseLocomotive loco, CarGroup group, DirectedPosition destLocation)
+        public static bool IsConsistWithinSpan(BaseLocomotive loco, CarGroup group, SpanBoundary destLocation)
         {
             if (destLocation.Segment == null) return false;
 

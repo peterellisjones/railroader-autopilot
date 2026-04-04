@@ -44,7 +44,7 @@ namespace Autopilot.Planning
                 }
 
                 var destination = waybill.Value.Destination;
-                List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)> destCandidates;
+                List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)> destCandidates;
                 try
                 {
                     destCandidates = _destinationSelector.GetDestinationCandidates(destination, loco);
@@ -87,7 +87,7 @@ namespace Autopilot.Planning
                 }
 
                 // Try candidates on the train's span first, then the rest.
-                var orderedCandidates = new System.Collections.Generic.List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex)>();
+                var orderedCandidates = new System.Collections.Generic.List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)>();
                 foreach (var c in destCandidates)
                     if (c.loc.Segment != null && consistSegIds.Contains(c.loc.Segment.id))
                         orderedCandidates.Add(c);
@@ -103,7 +103,7 @@ namespace Autopilot.Planning
                     if (failedSpans.Contains(candidate.spanIndex))
                         continue; // approach already failed for this span
 
-                    if (checker.CanDeliver(loco, group, candidate.loc))
+                    if (checker.CanDeliver(loco, group, candidate.approachTarget))
                     {
                         destLocation = candidate.loc;
                         coupleTarget = candidate.coupleTo;

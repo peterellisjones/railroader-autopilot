@@ -38,14 +38,14 @@ namespace Autopilot.Planning
 
         // --- Main API ---
 
-        public bool CanDeliver(BaseLocomotive loco, CarGroup group, DirectedPosition destLocation)
+        public bool CanDeliver(BaseLocomotive loco, CarGroup group, SpanBoundary destLocation)
         {
             if (group.IsEmpty) return false;
 
             if (!ApproachAnalyzer.CheckApproachDirection(loco, group, destLocation))
                 return false;
 
-            if (!CanRouteTo(loco, destLocation))
+            if (!CanRouteTo(loco, destLocation.ToDirectedPosition()))
                 return false;
 
             return true;
@@ -63,7 +63,7 @@ namespace Autopilot.Planning
         public (DirectedPosition? location, string? loopKey) GetRepositionLocation(
             BaseLocomotive loco, IEnumerable<string>? visitedSwitches,
             IEnumerable<string>? visitedLoopKeys = null,
-            List<DirectedPosition>? deliveryDestinations = null)
+            List<SpanBoundary>? deliveryDestinations = null)
             => LoopValidator.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDestinations);
 
         public bool CanRouteTo(BaseLocomotive loco, DirectedPosition destination)

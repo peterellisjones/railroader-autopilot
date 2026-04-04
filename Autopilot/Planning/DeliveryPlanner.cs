@@ -182,7 +182,7 @@ namespace Autopilot.Planning
                 // span lower bound (same target CheckApproachDirection routes to),
                 // not GetDestinationLocation which returns a coupling waypoint that
                 // may be on a different segment.
-                var deliveryDests = new List<DirectedPosition>();
+                var deliveryDests = new List<SpanBoundary>();
                 var seenDestIds = new HashSet<string>();
                 foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
                 {
@@ -196,7 +196,8 @@ namespace Autopilot.Planning
                         if (span.lower != null)
                         {
                             var pos = DirectedPosition.FromLocation(span.lower.Value);
-                            deliveryDests.Add(pos);
+                            var boundary = new SpanBoundary(pos.Segment, pos.DistanceFromA, pos.Facing);
+                            deliveryDests.Add(boundary);
                             Log($"Delivery dest for reversal check: {dest.DisplayName} → {pos.Segment?.id}");
                             break;
                         }

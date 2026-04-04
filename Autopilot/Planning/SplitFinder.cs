@@ -99,7 +99,8 @@ namespace Autopilot.Planning
                 // Check approach direction — does the tail actually lead?
                 // The route check above only verifies the route exists and is
                 // safe, not that the train arrives tail-first.
-                if (!_checker.ApproachAnalyzer.CheckApproachDirection(loco, group, destLoc))
+                var approachTarget = tailGroup.approachTarget;
+                if (!_checker.ApproachAnalyzer.CheckApproachDirection(loco, group, approachTarget))
                 {
                     LogDebug($"  Tail group {tailGroup.destName}: approach wrong (tail doesn't lead)");
                     continue;
@@ -118,10 +119,10 @@ namespace Autopilot.Planning
         /// <summary>
         /// Group cars by destination segment, ordered from loco-end to tail.
         /// </summary>
-        private List<(List<Car> cars, DirectedPosition destLocation, string destName)> GroupByDestination(
+        private List<(List<Car> cars, DirectedPosition destLocation, string destName, SpanBoundary approachTarget)> GroupByDestination(
             IReadOnlyList<ICar> cars, BaseLocomotive loco, IEnumerable<Car>? skippedCars = null)
         {
-            var groups = new List<(List<Car>, DirectedPosition, string)>();
+            var groups = new List<(List<Car>, DirectedPosition, string, SpanBoundary)>();
 
             // Iterate from loco-end (last index) toward tail (first index)
             int i = cars.Count - 1;
@@ -139,11 +140,21 @@ namespace Autopilot.Planning
 
                 DirectedPosition destLoc;
                 string destName;
+                SpanBoundary approachTarget;
                 try
                 {
                     var dest = car.Waybill.Value.Destination;
                     destLoc = _destinationSelector.GetDestinationLocation(dest, loco);
                     destName = dest.DisplayName;
+                    var destCandidates = _destinationSelector.GetDestinationCandidates(dest, loco);
+                    if (destCandidates.Count > 0)
+                    {
+                        approachTarget = destCandidates[0].approachTarget;
+                    }
+                    else
+                    {
+                        approachTarget = new SpanBoundary(destLoc.Segment, destLoc.DistanceFromA, destLoc.Facing);
+                    }
                 }
                 catch
                 {
@@ -177,7 +188,7 @@ namespace Autopilot.Planning
                     i--;
                 }
 
-                groups.Add((group, destLoc, destName));
+                groups.Add((group, destLoc, destName, approachTarget));
                 i--;
             }
 
