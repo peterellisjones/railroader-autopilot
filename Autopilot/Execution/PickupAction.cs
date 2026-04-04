@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Model;
 using Model.AI;
 using Autopilot.Model;
@@ -66,13 +67,14 @@ namespace Autopilot.Execution
                         return new ActionReplan(_target.TargetCars);
                     }
 
-                    // If the AE isn't moving toward the car, skip.
-                    // "At waypoint" + stopped + not coupled = AE thinks it's
-                    // there but can't couple (wrong position or unreachable).
+                    // If the AE isn't moving toward the car, skip this
+                    // approach but only mark the couple target as skipped —
+                    // not all target cars. The same chain may be reachable
+                    // from its other end on the next planning cycle.
                     if (wpSatisfied || (stopped && status.Contains("At waypoint") && _stuckTimer > 5f))
                     {
-                        Loader.Mod.Logger.Log($"Autopilot Pickup: AE not moving to {_target.CoupleTarget.DisplayName} (status={status}) — skipping");
-                        return new ActionReplan(_target.TargetCars);
+                        Loader.Mod.Logger.Log($"Autopilot Pickup: AE not moving to {_target.CoupleTarget.DisplayName} (status={status}) — skipping approach");
+                        return new ActionReplan(new List<Car> { _target.CoupleTarget });
                     }
 
                     if (trainService.IsStopped(loco))
