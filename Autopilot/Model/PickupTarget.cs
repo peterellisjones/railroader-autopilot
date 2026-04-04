@@ -7,7 +7,7 @@ namespace Autopilot.Model
 {
     /// <summary>
     /// Represents a single pickup operation: the car to couple with,
-    /// the target cars that will be collected, and the destination name.
+    /// and the target cars that will be collected.
     /// Non-target cars coupled behind the targets come along for the ride
     /// (no uncoupling — they stay in the consist).
     /// </summary>
@@ -22,16 +22,12 @@ namespace Autopilot.Model
         /// <summary>Consecutive target cars from the approach end.</summary>
         public List<Car> TargetCars { get; }
 
-        /// <summary>Destination name for display.</summary>
-        public string DestinationName { get; }
-
         public PickupTarget(Car coupleTarget, CoupleWaypoint coupleLocation,
-            List<Car> targetCars, string destinationName)
+            List<Car> targetCars)
         {
             CoupleTarget = coupleTarget;
             CoupleLocation = coupleLocation;
             TargetCars = targetCars;
-            DestinationName = destinationName;
         }
 
         public string CarNames => string.Join(", ", TargetCars.Select(c => c.DisplayName));

@@ -266,7 +266,7 @@ namespace Autopilot.UI
                             if (_selectedMode != AutopilotMode.Pickup)
                             {
                                 _selectedMode = AutopilotMode.Pickup;
-                                _destinations = controller.GetReachableDestinations();
+                                _destinations = new List<string>(); // TODO: Task 8 will replace with filter panel
                                 _selectedDestinationIndex = _destinations.Count > 0 ? 0 : -1;
                                 RebuildPanel();
                             }

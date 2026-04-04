@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Model;
 using Autopilot.Model;
 using Autopilot.Planning;
@@ -386,7 +385,7 @@ namespace Autopilot.Execution
             PickupTarget? target;
             try
             {
-                target = _pickupPlanner!.FindNextPickup(_loco, ExtractDestinationName(p.PickupFilter), p.Context.SkippedCars);
+                target = _pickupPlanner!.FindNextPickup(_loco, p.PickupFilter!, p.Context.SkippedCars);
             }
             catch (Exception ex)
             {
@@ -451,19 +450,6 @@ namespace Autopilot.Execution
             }
 
             SetPhase(new Failed(message, lastPlan));
-        }
-
-        /// <summary>
-        /// Temporary bridge: extract a destination name string from a PickupFilter
-        /// for the current FindNextPickup(string) signature. Will be removed when
-        /// Task 6 updates FindNextPickup to accept PickupFilter directly.
-        /// </summary>
-        private string? ExtractDestinationName(PickupFilter? filter)
-        {
-            if (filter == null) return null;
-            if (filter.To.Mode == FilterMode.Destination && filter.To.CheckedItems.Count > 0)
-                return filter.To.CheckedItems.First();
-            return null;
         }
 
         private void SetPhase(AutopilotPhase newPhase)

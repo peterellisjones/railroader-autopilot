@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Model;
 using Model.AI;
+using Model.Ops;
 using Track;
+using UnityEngine;
 using Autopilot.Model;
 using Autopilot.Services;
 
@@ -67,37 +69,135 @@ namespace Autopilot.Planning
         }
 
         /// <summary>
-        /// Scan uncoupled cars reachable from the loco. Return distinct
-        /// destination names (sorted) for cars with waybills.
+        /// Check if a car matches the filter's base criteria: has an active waybill,
+        /// switchlist membership (if applicable), and To:Destination match.
+        /// Area/Industry checks that require game world data are handled separately
+        /// by MatchesFromFilter and MatchesToFilter.
         /// </summary>
-        public List<string> GetReachableDestinations(BaseLocomotive loco)
+        public static bool MatchesFilter(ICar car, PickupFilter filter, HashSet<string> switchlistCarIds)
         {
-            var nearbyCars = _trainService.GetNearbyCars(loco);
-            var destinations = new HashSet<string>();
+            var waybill = car.Waybill;
+            if (waybill == null) return false;
+            if (waybill.Value.Completed) return false;
 
-            foreach (var car in nearbyCars)
+            if (filter.From.Mode == Autopilot.Model.FilterMode.Switchlist)
             {
-                var waybill = _trainService.GetWaybill(car);
-                if (waybill == null) continue;
-                if (waybill.Value.Completed) continue;
-
-                var destName = waybill.Value.Destination.DisplayName;
-                if (string.IsNullOrEmpty(destName)) continue;
-
-                destinations.Add(destName);
+                if (!switchlistCarIds.Contains(car.id)) return false;
             }
 
-            var result = destinations.ToList();
-            result.Sort();
-            Log($"Found {result.Count} reachable destination(s)");
-            return result;
+            if (filter.To.Mode == Autopilot.Model.FilterMode.Switchlist)
+            {
+                if (!switchlistCarIds.Contains(car.id)) return false;
+            }
+
+            if (filter.To.Mode == Autopilot.Model.FilterMode.Destination)
+            {
+                if (!filter.To.CheckedItems.Contains(waybill.Value.Destination.DisplayName))
+                    return false;
+            }
+
+            return true;
         }
 
         /// <summary>
-        /// Find the nearest accessible car (or group) bound for the given
-        /// destination. Returns null if no more targets are reachable.
+        /// Check if a car's physical location matches the From filter axis.
+        /// Any/Switchlist modes are already handled by MatchesFilter.
         /// </summary>
-        public PickupTarget? FindNextPickup(BaseLocomotive loco, string destinationName,
+        private static bool MatchesFromFilter(Car car, PickupFilter filter)
+        {
+            switch (filter.From.Mode)
+            {
+                case Autopilot.Model.FilterMode.Any:
+                case Autopilot.Model.FilterMode.Switchlist:
+                    return true;
+
+                case Autopilot.Model.FilterMode.Area:
+                {
+                    var area = OpsController.Shared?.ClosestArea(car);
+                    return area != null && filter.From.CheckedItems.Contains(area.name);
+                }
+
+                case Autopilot.Model.FilterMode.Industry:
+                {
+                    var ops = OpsController.Shared;
+                    if (ops == null) return false;
+                    var carPos = car.GetCenterPosition(Graph.Shared);
+                    foreach (var area in ops.Areas)
+                    {
+                        if (!area.Contains(carPos)) continue;
+                        foreach (var industry in area.Industries)
+                        {
+                            if (filter.From.CheckedItems.Contains(industry.name))
+                                return true;
+                        }
+                    }
+                    return false;
+                }
+
+                case Autopilot.Model.FilterMode.Destination:
+                {
+                    // From:Destination checks the car's waybill origin siding
+                    var waybill = car.Waybill;
+                    if (waybill == null) return false;
+                    var origin = waybill.Value.Origin;
+                    if (origin == null) return false;
+                    return filter.From.CheckedItems.Contains(origin.Value.DisplayName);
+                }
+
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// Check if a car's waybill destination matches the To filter axis.
+        /// Any/Switchlist/Destination modes are already handled by MatchesFilter.
+        /// </summary>
+        private static bool MatchesToFilter(Car car, PickupFilter filter)
+        {
+            switch (filter.To.Mode)
+            {
+                case Autopilot.Model.FilterMode.Any:
+                case Autopilot.Model.FilterMode.Switchlist:
+                case Autopilot.Model.FilterMode.Destination:
+                    return true;
+
+                case Autopilot.Model.FilterMode.Area:
+                {
+                    var waybill = car.Waybill;
+                    if (waybill == null) return false;
+                    var area = OpsController.Shared?.AreaForCarPosition(waybill.Value.Destination);
+                    return area != null && filter.To.CheckedItems.Contains(area.name);
+                }
+
+                case Autopilot.Model.FilterMode.Industry:
+                {
+                    var waybill = car.Waybill;
+                    if (waybill == null) return false;
+                    var ops = OpsController.Shared;
+                    if (ops == null) return false;
+                    foreach (var area in ops.Areas)
+                    {
+                        foreach (var industry in area.Industries)
+                        {
+                            if (industry.Contains(waybill.Value.Destination)
+                                && filter.To.CheckedItems.Contains(industry.name))
+                                return true;
+                        }
+                    }
+                    return false;
+                }
+
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// Find the nearest accessible car (or group) matching the filter.
+        /// Returns null if no more targets are reachable.
+        /// </summary>
+        public PickupTarget? FindNextPickup(BaseLocomotive loco, PickupFilter filter,
             HashSet<Car>? skippedCars = null)
         {
             _trainService.ClearPlanCaches();
@@ -105,16 +205,42 @@ namespace Autopilot.Planning
             Log($"GetNearbyCars returned {nearbyCars.Count} cars");
             var graph = Graph.Shared;
 
-            // Find all uncoupled cars with matching waybill destination
+            // Get switchlist car IDs if either axis uses switchlist mode
+            HashSet<string> switchlistCarIds;
+            if (filter.From.Mode == Autopilot.Model.FilterMode.Switchlist
+                || filter.To.Mode == Autopilot.Model.FilterMode.Switchlist)
+            {
+                switchlistCarIds = _trainService.GetSwitchlistCarIds();
+            }
+            else
+            {
+                switchlistCarIds = new HashSet<string>();
+            }
+
+            // Get loco position for crow-flies distance pre-filter
+            var locoPos = loco.GetCenterPosition(graph);
+
+            // Find all uncoupled cars matching the filter
             var matchingCarIds = new HashSet<string>();
             var matchingCars = new Dictionary<string, Car>();
             foreach (var car in nearbyCars)
             {
-                var waybill = _trainService.GetWaybill(car);
-                if (waybill == null) continue;
-                if (waybill.Value.Completed) continue;
                 if (skippedCars != null && skippedCars.Contains(car)) continue;
-                if (waybill.Value.Destination.DisplayName != destinationName) continue;
+
+                // Crow-flies distance pre-filter
+                var carPos = car.GetCenterPosition(graph);
+                if (filter.MaxDistance < float.MaxValue
+                    && Vector3.Distance(locoPos, carPos) > filter.MaxDistance)
+                    continue;
+
+                // Base filter checks (waybill, switchlist, To:Destination)
+                var wrapped = (ICar)new CarAdapter(car);
+                if (!MatchesFilter(wrapped, filter, switchlistCarIds)) continue;
+
+                // Game-world-dependent checks
+                if (!MatchesFromFilter(car, filter)) continue;
+                if (!MatchesToFilter(car, filter)) continue;
+
                 matchingCarIds.Add(car.id);
                 matchingCars[car.id] = car;
                 Log($"Matching car: {car.DisplayName} on seg={car.LocationA.segment?.id}, visible={car.IsVisible}");
@@ -122,11 +248,11 @@ namespace Autopilot.Planning
 
             if (matchingCarIds.Count == 0)
             {
-                Log($"No cars found for destination '{destinationName}'");
+                Log($"No cars found matching filter");
                 return null;
             }
 
-            Log($"Found {matchingCarIds.Count} car(s) for '{destinationName}'");
+            Log($"Found {matchingCarIds.Count} car(s) matching filter");
 
             var candidates = new List<(PickupTarget target, float distance)>();
             var processedChains = new HashSet<string>();
@@ -230,13 +356,13 @@ namespace Autopilot.Planning
 
                     var targetCars = targets.Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
                     candidates.Add((new PickupTarget(
-                        coupleTarget, coupleLocation, targetCars!, destinationName), distance));
+                        coupleTarget, coupleLocation, targetCars!), distance));
                 }
             }
 
             if (candidates.Count == 0)
             {
-                Log($"No accessible targets for '{destinationName}'");
+                Log($"No accessible targets matching filter");
                 return null;
             }
 

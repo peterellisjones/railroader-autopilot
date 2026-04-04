@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Autopilot.Model;
+using Autopilot.Planning;
+using Model.Ops;
+using Track;
 
 namespace Autopilot.Tests
 {
@@ -129,6 +132,107 @@ namespace Autopilot.Tests
                 summary == "From: Sylva, Balsam → To: Any" ||
                 summary == "From: Balsam, Sylva → To: Any",
                 $"Unexpected summary: {summary}");
+        }
+
+        // ── MatchesFilter ────────────────────────────────────────────────────────
+
+        [Test]
+        public void MatchesCar_any_any_matches_car_with_waybill()
+        {
+            var car = new MockCar
+            {
+                id = "c1",
+                DisplayName = "Box Car",
+                Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, false, null, 0)
+            };
+            var filter = PickupFilter.Default;
+            Assert.IsTrue(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+        }
+
+        [Test]
+        public void MatchesCar_completed_waybill_does_not_match()
+        {
+            var car = new MockCar
+            {
+                id = "c1",
+                DisplayName = "Box Car",
+                Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, true, null, 0)
+            };
+            var filter = PickupFilter.Default;
+            Assert.IsFalse(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+        }
+
+        [Test]
+        public void MatchesCar_no_waybill_does_not_match()
+        {
+            var car = new MockCar { id = "c1", DisplayName = "Box Car", Waybill = null };
+            var filter = PickupFilter.Default;
+            Assert.IsFalse(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+        }
+
+        [Test]
+        public void MatchesCar_to_destination_matches()
+        {
+            var car = new MockCar
+            {
+                id = "c1",
+                Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, false, null, 0)
+            };
+            var filter = new PickupFilter(
+                FilterAxis.Any,
+                new FilterAxis(FilterMode.Destination, new HashSet<string> { "Mill S1" }),
+                float.MaxValue, false);
+            Assert.IsTrue(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+        }
+
+        [Test]
+        public void MatchesCar_to_destination_no_match()
+        {
+            var car = new MockCar
+            {
+                id = "c1",
+                Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, false, null, 0)
+            };
+            var filter = new PickupFilter(
+                FilterAxis.Any,
+                new FilterAxis(FilterMode.Destination, new HashSet<string> { "Lumber S2" }),
+                float.MaxValue, false);
+            Assert.IsFalse(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+        }
+
+        [Test]
+        public void MatchesCar_switchlist_matches_when_on_list()
+        {
+            var car = new MockCar
+            {
+                id = "c1",
+                Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, false, null, 0)
+            };
+            var filter = new PickupFilter(
+                new FilterAxis(FilterMode.Switchlist, new HashSet<string>()),
+                FilterAxis.Any,
+                float.MaxValue, false);
+            Assert.IsTrue(PickupPlanner.MatchesFilter(car, filter, new HashSet<string> { "c1" }));
+        }
+
+        [Test]
+        public void MatchesCar_switchlist_no_match_when_not_on_list()
+        {
+            var car = new MockCar
+            {
+                id = "c1",
+                Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, false, null, 0)
+            };
+            var filter = new PickupFilter(
+                new FilterAxis(FilterMode.Switchlist, new HashSet<string>()),
+                FilterAxis.Any,
+                float.MaxValue, false);
+            Assert.IsFalse(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+        }
+
+        private static OpsCarPosition TestOpsCarPosition(string displayName, string identifier)
+        {
+            return new OpsCarPosition(displayName, identifier, System.Array.Empty<TrackSpan>());
         }
     }
 }
