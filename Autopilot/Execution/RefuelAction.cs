@@ -32,6 +32,8 @@ namespace Autopilot.Execution
         private Phase _phase;
         private float _stuckTimer;
         private float _statusTimer;
+        private float _refuelStartLevel = -1f;
+        private float _noProgressTimer;
         private string _statusMessage;
         private string? _initError;
 
@@ -146,25 +148,31 @@ namespace Autopilot.Execution
                 return TransitionToRefueling(loco, trainService);
             }
 
-            float minDist = float.MaxValue;
-            if (foundF) minDist = Math.Min(minDist, distF);
-            if (foundR) minDist = Math.Min(minDist, distR);
+            // Compute distance from the fuel car's CENTER to the loader.
+            // Using (distF + distR) / 2 centers the car on the loader,
+            // rather than just bringing the nearest end close.
+            float centerDist;
+            if (foundF && foundR)
+                centerDist = (distF + distR) / 2f;
+            else if (foundF)
+                centerDist = distF;
+            else
+                centerDist = distR;
 
             Loader.Mod.Logger.Log($"Autopilot RefuelAction: fuel car {fuelCar.DisplayName} " +
-                $"distance to loader: F={distF:F1}m(found={foundF}) R={distR:F1}m(found={foundR}) min={minDist:F1}m");
+                $"distance to loader: F={distF:F1}m(found={foundF}) R={distR:F1}m(found={foundR}) center={centerDist:F1}m");
 
-            if (minDist > 3f)
+            if (centerDist > 2f)
             {
-                // Nudge the train to better position the fuel car.
+                // Nudge the train to center the fuel car on the loader.
                 // Direction: the fuel car's closer end tells us which way to move.
-                // If fuelCar.LocationF is closer to the loader, move the train toward F (forward).
                 bool goForward = foundF && (!foundR || distF < distR);
 
-                Loader.Mod.Logger.Log($"Autopilot RefuelAction: nudging {minDist:F1}m " +
-                    $"(forward={goForward}) to align fuel car with loader");
+                Loader.Mod.Logger.Log($"Autopilot RefuelAction: nudging {centerDist:F1}m " +
+                    $"(forward={goForward}) to center fuel car on loader");
 
                 _statusMessage = $"Positioning for {_facility.FuelType}...";
-                trainService.MoveDistance(loco, minDist, goForward);
+                trainService.MoveDistance(loco, centerDist, goForward);
                 _phase = Phase.Positioning;
                 _statusTimer = 0f;
                 return new InProgress();
@@ -204,7 +212,11 @@ namespace Autopilot.Execution
 
             float level = trainService.GetFuelLevel(loco, _facility.FuelType);
 
-            // Update status message periodically
+            // Track starting level and progress
+            if (_refuelStartLevel < 0f)
+                _refuelStartLevel = level;
+
+            // Update status message
             _statusMessage = $"Refueling {_facility.FuelType} ({level:0}%)...";
 
             // Check if tank is full (within threshold)
@@ -224,8 +236,27 @@ namespace Autopilot.Execution
                 return new InProgress();
             }
 
-            // Safety timeout: if we've been refueling for 5 minutes with no progress,
-            // something is wrong (loader not reaching car, etc.)
+            // Progress check: if no fuel has flowed in 30 seconds, the car
+            // probably isn't positioned close enough to the loader.
+            if (level > _refuelStartLevel + 1f)
+            {
+                // Fuel is flowing — reset progress timer
+                _noProgressTimer = 0f;
+                _refuelStartLevel = level;
+            }
+            else
+            {
+                _noProgressTimer += AutopilotController.TickInterval;
+                if (_noProgressTimer > 30f)
+                {
+                    Loader.Mod.Logger.Log($"Autopilot RefuelAction: no fuel progress in 30s " +
+                        $"({_facility.FuelType} stuck at {level:F1}%), car may not be positioned correctly");
+                    _phase = Phase.Cleanup;
+                    return new InProgress();
+                }
+            }
+
+            // Safety timeout
             if (_statusTimer > 300f)
             {
                 Loader.Mod.Logger.Log($"Autopilot RefuelAction: refueling timeout after 300s, " +
