@@ -4,6 +4,7 @@ using Track;
 using Track.Search;
 using Autopilot.Model;
 using Autopilot.Services;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Planning
 {
@@ -14,6 +15,10 @@ namespace Autopilot.Planning
         public RouteChecker RouteChecker { get; }
         public ApproachAnalyzer ApproachAnalyzer { get; }
         public LoopValidator LoopValidator { get; }
+
+        // Testable planning fields (used by interface-based constructor path)
+        private readonly ITrainService? _iTrainService;
+        private readonly IGraphAdapter? _iGraph;
 
         // Cached per plan cycle — GetLoopStatus is expensive (up to 5 loop searches)
         private LoopStatus? _cachedLoopStatus;
@@ -26,6 +31,18 @@ namespace Autopilot.Planning
             RouteChecker = new RouteChecker(trainService, _logger);
             ApproachAnalyzer = new ApproachAnalyzer(RouteChecker, _logger);
             LoopValidator = new LoopValidator(RouteChecker, trainService, _logger);
+        }
+
+        /// <summary>Constructor for testable planning.</summary>
+        public FeasibilityChecker(ITrainService trainService, IGraphAdapter graph)
+        {
+            _iTrainService = trainService;
+            _iGraph = graph;
+            _trainService = null!;
+            _logger = new PlanningLogger();
+            RouteChecker = new RouteChecker(trainService, graph, NullPlanningLogger.Instance);
+            ApproachAnalyzer = new ApproachAnalyzer(RouteChecker, graph, NullPlanningLogger.Instance);
+            LoopValidator = null!; // Loop queries go through ITrainService
         }
 
         public void ClearCache()
@@ -77,5 +94,23 @@ namespace Autopilot.Planning
             BaseLocomotive loco, DirectedPosition destination,
             float trainLength, List<Car> ignoredCars)
             => RouteChecker.CanRouteToWithSteps(loco, destination, trainLength, ignoredCars);
+
+        // =================================================================
+        // Testable overloads using ITrainService + IGraphAdapter
+        // =================================================================
+
+        /// <summary>
+        /// Check if delivery is feasible using abstract positions.
+        /// Checks approach direction and route feasibility.
+        /// </summary>
+        public bool CanDeliver(GraphPosition tailOutward, GraphPosition tailInward,
+            GraphPosition destLocation)
+        {
+            if (!ApproachAnalyzer.CheckApproachDirection(tailOutward, tailInward, destLocation))
+                return false;
+            if (!RouteChecker.CanRouteTo(destLocation))
+                return false;
+            return true;
+        }
     }
 }
