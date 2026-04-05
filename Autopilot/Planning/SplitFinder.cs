@@ -6,6 +6,7 @@ using Track;
 using Track.Search;
 using Autopilot.Model;
 using Autopilot.Services;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Planning
 {
@@ -15,11 +16,27 @@ namespace Autopilot.Planning
         private readonly FeasibilityChecker _checker;
         private readonly DestinationSelector _destinationSelector;
 
+        // Testable planning fields (used by interface-based constructor path)
+        private readonly ITrainService? _iTrainService;
+        private readonly IGraphAdapter? _iGraph;
+        private readonly FeasibilityChecker? _iChecker;
+
         public SplitFinder(TrainService trainService, FeasibilityChecker checker, DestinationSelector destinationSelector)
         {
             _trainService = trainService;
             _checker = checker;
             _destinationSelector = destinationSelector;
+        }
+
+        /// <summary>Constructor for testable planning.</summary>
+        public SplitFinder(ITrainService trainService, IGraphAdapter graph, FeasibilityChecker checker)
+        {
+            _iTrainService = trainService;
+            _iGraph = graph;
+            _iChecker = checker;
+            _trainService = null!;
+            _checker = null!;
+            _destinationSelector = null!;
         }
 
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot SplitFinder: {msg}");
@@ -99,6 +116,139 @@ namespace Autopilot.Planning
 
             Log("No valid split found");
             return null;
+        }
+
+        // =================================================================
+        // Testable overload using ITrainService + IGraphAdapter
+        // =================================================================
+
+        /// <summary>
+        /// Find the best split point using abstract interfaces (no game types).
+        /// Groups cars by destination and tries each cut point, checking feasibility
+        /// via the abstract FeasibilityChecker.CanDeliver overload.
+        /// </summary>
+        public SplitInfo? FindBestSplit(CarGroup group, IReadOnlyCollection<string>? skippedCarIds = null)
+        {
+            if (_iTrainService == null || _iChecker == null)
+                return null;
+
+            if (group.IsEmpty || group.Count < 2)
+                return null;
+
+            var cars = group.Cars;
+
+            var destGroups = GroupByDestinationAbstract(cars, skippedCarIds);
+            if (destGroups.Count < 2)
+                return null;
+
+            for (int keepCount = 1; keepCount < destGroups.Count; keepCount++)
+            {
+                var tailGroup = destGroups[keepCount - 1];
+
+                if (tailGroup.destLocation.SegmentId == null) continue;
+
+                // Check feasibility via the abstract CanDeliver overload
+                if (!group.TailOutwardEnd.HasValue || !group.TailInwardEnd.HasValue)
+                    continue;
+
+                if (!_iChecker.CanDeliver(group.TailOutwardEnd.Value,
+                        group.TailInwardEnd.Value, tailGroup.approachTarget))
+                    continue;
+
+                // Build the split info from abstract types
+                var keptCars = new List<ICar>();
+                for (int g = 0; g < keepCount; g++)
+                    keptCars.AddRange(destGroups[g].cars);
+
+                var droppedCars = new List<ICar>();
+                for (int g = keepCount; g < destGroups.Count; g++)
+                    droppedCars.AddRange(destGroups[g].cars);
+
+                var splitCar = keptCars[keptCars.Count - 1];
+                var firstDropped = droppedCars[0];
+
+                // Determine split end: which end of splitCar faces the first dropped car
+                var splitEnd = splitCar.CoupledTo(Car.LogicalEnd.A)?.id == firstDropped.id
+                    ? Car.LogicalEnd.A : Car.LogicalEnd.B;
+
+                // Couple target is the first dropped car
+                var coupleTarget = firstDropped;
+                var freeEnd = coupleTarget.CoupledTo(Car.LogicalEnd.A) != null
+                    ? Car.LogicalEnd.B : Car.LogicalEnd.A;
+
+                // Get the couple target's position for the waypoint
+                var coupleTargetPos = freeEnd == Car.LogicalEnd.A
+                    ? coupleTarget.EndA : coupleTarget.EndB;
+                var dropGp = new GraphPosition(coupleTargetPos.Segment?.id,
+                    coupleTargetPos.DistanceFromA, coupleTargetPos.Facing);
+                var graphCoupleWp = new GraphCoupleWaypoint(
+                    coupleTargetPos.Segment?.id, coupleTargetPos.DistanceFromA, coupleTargetPos.Facing);
+
+                return new SplitInfo(splitCar, splitEnd, droppedCars,
+                    dropGp, coupleTarget, graphCoupleWp);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Group cars by destination using ITrainService for waybill queries.
+        /// Works from the tail end (index 0) backward, grouping consecutive cars
+        /// with the same destination track.
+        /// </summary>
+        private List<(List<ICar> cars, GraphPosition destLocation, string destName, GraphPosition approachTarget)>
+            GroupByDestinationAbstract(IReadOnlyList<ICar> cars, IReadOnlyCollection<string>? skippedCarIds)
+        {
+            var groups = new List<(List<ICar>, GraphPosition, string, GraphPosition)>();
+
+            int i = cars.Count - 1;
+            while (i >= 0)
+            {
+                var car = cars[i];
+
+                if (car.IsLocoOrTender || !_iTrainService!.HasWaybill(car)
+                    || (skippedCarIds != null && skippedCarIds.Contains(car.id)))
+                {
+                    i--;
+                    continue;
+                }
+
+                var destTrackId = _iTrainService.GetDestinationTrackId(car);
+                var destName = _iTrainService.GetDestinationName(car);
+                if (destTrackId == null || destName == null)
+                {
+                    i--;
+                    continue;
+                }
+
+                var candidates = _iTrainService.GetDestinationCandidates(car);
+                if (candidates.Count == 0)
+                {
+                    i--;
+                    continue;
+                }
+
+                var destLocation = candidates[0].Location;
+                var approachTarget = candidates[0].ApproachTarget;
+
+                var carGroup = new List<ICar> { car };
+                while (i - 1 >= 0)
+                {
+                    var nextCar = cars[i - 1];
+                    if (nextCar.IsLocoOrTender || !_iTrainService.HasWaybill(nextCar))
+                        break;
+                    var nextDestTrackId = _iTrainService.GetDestinationTrackId(nextCar);
+                    if (nextDestTrackId != destTrackId)
+                        break;
+                    carGroup.Add(nextCar);
+                    i--;
+                }
+
+                groups.Add((carGroup, destLocation, destName, approachTarget));
+                i--;
+            }
+
+            return groups;
         }
 
         private List<(List<Car> cars, DirectedPosition destLocation, string destName, SpanBoundary approachTarget)> GroupByDestination(

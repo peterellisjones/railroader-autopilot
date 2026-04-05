@@ -14,9 +14,25 @@ namespace Autopilot.Planning
     {
         private readonly TrainService _trainService;
 
+        // Testable planning fields (used by interface-based constructor path)
+        private readonly ITrainService? _iTrainService;
+
         public PickupPlanner(TrainService trainService)
         {
             _trainService = trainService;
+        }
+
+        /// <summary>
+        /// Constructor for testable planning.
+        /// Note: FindNextPickup, GetEligibleCars, GetFromOptions, GetToOptions
+        /// remain on the game-typed path (they search world cars, resolve industries).
+        /// The static methods (FilterAccessibleTargets, GetCoupledChain, MatchesFilter)
+        /// are already testable without an instance.
+        /// </summary>
+        public PickupPlanner(ITrainService trainService)
+        {
+            _iTrainService = trainService;
+            _trainService = null!;
         }
 
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot Pickup: {msg}");
