@@ -5,7 +5,7 @@ using Autopilot.Model;
 
 namespace Autopilot.Planning
 {
-    public class PlanningLogger
+    public class PlanningLogger : IPlanningLogger
     {
         public void Log(string prefix, string msg)
         {

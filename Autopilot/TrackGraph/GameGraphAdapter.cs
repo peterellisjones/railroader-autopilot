@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Model;
 using Track;
 using Track.Search;
@@ -45,6 +46,35 @@ namespace Autopilot.TrackGraph
         /// <summary>Get a previously registered node by ID.</summary>
         public TrackNode GetNode(string id) =>
             id != null && _nodes.TryGetValue(id, out var n) ? n : null;
+
+        // --- Type conversion methods ---
+
+        /// <summary>Convert a game DirectedPosition to a GraphPosition.</summary>
+        public GraphPosition ToGraphPosition(DirectedPosition dp)
+            => new(GetSegmentId(dp.Segment), dp.DistanceFromA, dp.Facing);
+
+        /// <summary>Convert a GraphPosition to a game DirectedPosition.</summary>
+        public DirectedPosition ToDirectedPosition(GraphPosition gp)
+            => new(GetSegment(gp.SegmentId), gp.DistanceFromA, gp.Facing);
+
+        /// <summary>Convert an UndirectedGraphPosition to a game TrackPosition.</summary>
+        public TrackPosition ToTrackPosition(UndirectedGraphPosition ugp)
+            => new(GetSegment(ugp.SegmentId), ugp.DistanceFromA);
+
+        /// <summary>Resolve car IDs to game Car objects via TrainController.</summary>
+        private HashSet<Car> ResolveCarIds(IReadOnlyCollection<string>? carIds)
+        {
+            var result = new HashSet<Car>();
+            if (carIds == null) return result;
+            var tc = TrainController.Shared;
+            if (tc == null) return result;
+            foreach (var id in carIds)
+            {
+                var car = tc.CarForId(id);
+                if (car != null) result.Add(car);
+            }
+            return result;
+        }
 
         public string GetNodeAtEnd(string segmentId, bool endA)
         {
@@ -133,19 +163,19 @@ namespace Autopilot.TrackGraph
             CarBlockingRoute = 500
         };
 
-        public RouteResult? FindRoute(DirectedPosition from, DirectedPosition to,
-            IReadOnlyCollection<Car>? ignoredCars = null, bool checkForCars = true)
+        public RouteResult? FindRoute(GraphPosition from, GraphPosition to,
+            IReadOnlyCollection<string>? ignoredCarIds = null, bool checkForCars = true)
         {
             try
             {
-                var startLoc = from.ToLocation();
-                var endLoc = to.ToLocation();
+                var fromDp = ToDirectedPosition(from);
+                var toDp = ToDirectedPosition(to);
+                var startLoc = fromDp.ToLocation();
+                var endLoc = toDp.ToLocation();
                 if (startLoc.segment == null || endLoc.segment == null)
                     return null;
 
-                var ignored = ignoredCars != null
-                    ? new HashSet<Car>(ignoredCars)
-                    : new HashSet<Car>();
+                var ignored = ResolveCarIds(ignoredCarIds);
                 var impasse = new HashSet<Car>();
                 var steps = new List<RouteSearch.Step>();
 
@@ -165,8 +195,10 @@ namespace Autopilot.TrackGraph
                     return null;
                 }
 
-                int reversals = CountReversalsFromSteps(steps);
-                return new RouteResult(metrics.Distance, reversals, BlockedByCars: false);
+                var deduped = Planning.ReversalCounter.DeduplicateSegments(steps);
+                int reversals = Planning.ReversalCounter.FromSegments(deduped, _graph);
+                var segIds = deduped.ConvertAll(s => s.id);
+                return new RouteResult(metrics.Distance, reversals, BlockedByCars: false, segIds);
             }
             catch
             {
@@ -174,40 +206,88 @@ namespace Autopilot.TrackGraph
             }
         }
 
-        public RouteResult? FindBestRoute(TrackPosition from, DirectedPosition to,
-            IReadOnlyCollection<Car>? ignoredCars = null, bool checkForCars = true)
+        public RouteResult? FindBestRoute(UndirectedGraphPosition from, GraphPosition to,
+            IReadOnlyCollection<string>? ignoredCarIds = null, bool checkForCars = true)
         {
             // Try both facing directions from the undirected start position
-            var facingB = new DirectedPosition(from.Segment, from.DistanceFromA, Direction.TowardEndB);
-            var facingA = new DirectedPosition(from.Segment, from.DistanceFromA, Direction.TowardEndA);
+            var facingB = new GraphPosition(from.SegmentId, from.DistanceFromA, Direction.TowardEndB);
+            var facingA = new GraphPosition(from.SegmentId, from.DistanceFromA, Direction.TowardEndA);
 
-            var resultB = FindRoute(facingB, to, ignoredCars, checkForCars);
-            var resultA = FindRoute(facingA, to, ignoredCars, checkForCars);
+            var resultB = FindRoute(facingB, to, ignoredCarIds, checkForCars);
+            var resultA = FindRoute(facingA, to, ignoredCarIds, checkForCars);
 
             if (resultB == null) return resultA;
             if (resultA == null) return resultB;
             return resultA.Value.Distance <= resultB.Value.Distance ? resultA : resultB;
         }
 
-        /// <summary>
-        /// Count reversals by detecting direction changes in route steps.
-        /// Each time the step direction flips (Out→Back or Back→Out) is one reversal.
-        /// </summary>
-        private static int CountReversalsFromSteps(List<RouteSearch.Step> steps)
+        public string? FindSharedNode(string segmentIdA, string segmentIdB)
         {
-            if (steps.Count < 2) return 0;
+            var nodeAA = GetNodeAtEnd(segmentIdA, true);
+            var nodeAB = GetNodeAtEnd(segmentIdA, false);
+            var nodeBA = GetNodeAtEnd(segmentIdB, true);
+            var nodeBB = GetNodeAtEnd(segmentIdB, false);
+            if (nodeAA != null && (nodeAA == nodeBA || nodeAA == nodeBB)) return nodeAA;
+            if (nodeAB != null && (nodeAB == nodeBA || nodeAB == nodeBB)) return nodeAB;
+            return null;
+        }
 
-            int reversals = 0;
-            var prevDirection = steps[0].Direction;
-            for (int i = 1; i < steps.Count; i++)
+        public bool? DirectionTowardIsEndA(string fromSegmentId, string toSegmentId, int maxHops = 5)
+        {
+            if (fromSegmentId == toSegmentId) return null;
+
+            // Try walking from End A
+            if (WalkToward(fromSegmentId, true, toSegmentId, maxHops))
+                return true;
+
+            // Try walking from End B
+            if (WalkToward(fromSegmentId, false, toSegmentId, maxHops))
+                return false;
+
+            return null;
+        }
+
+        /// <summary>
+        /// Walk from the given end of a segment, crossing nodes, checking if toSegmentId is reachable.
+        /// </summary>
+        private bool WalkToward(string startSegId, bool startEndA, string targetSegId, int maxHops)
+        {
+            var currentSegId = startSegId;
+            var currentEndA = startEndA;
+
+            for (int hop = 0; hop < maxHops; hop++)
             {
-                if (steps[i].Direction != prevDirection)
+                var nodeId = GetNodeAtEnd(currentSegId, currentEndA);
+                if (nodeId == null) return false;
+
+                if (IsSwitch(nodeId))
                 {
-                    reversals++;
-                    prevDirection = steps[i].Direction;
+                    // At a switch, check all legs
+                    var (enter, exitNormal, exitReverse) = GetSwitchLegs(nodeId);
+                    var candidates = new[] { enter, exitNormal, exitReverse }
+                        .Where(s => s != null && s != currentSegId);
+                    foreach (var nextSegId in candidates)
+                    {
+                        if (nextSegId == targetSegId) return true;
+                    }
+                    // Don't continue through switches — would require branching search
+                    return false;
+                }
+                else
+                {
+                    // Non-switch node: continue to the next segment
+                    var nextSegId = GetReachableSegment(currentSegId, currentEndA);
+                    if (nextSegId == null) return false;
+                    if (nextSegId == targetSegId) return true;
+
+                    // Continue walking: determine which end of nextSeg the node is at
+                    var nextNodeA = GetNodeAtEnd(nextSegId, true);
+                    // If nodeId is at End A of nextSeg, we continue from End B (the far end)
+                    currentEndA = nextNodeA != nodeId;
+                    currentSegId = nextSegId;
                 }
             }
-            return reversals;
+            return false;
         }
     }
 }

@@ -7,7 +7,8 @@ namespace Autopilot.Model
     public readonly record struct RouteResult(
         float Distance,
         int ReversalCount,
-        bool BlockedByCars
+        bool BlockedByCars,
+        System.Collections.Generic.IReadOnlyList<string>? RouteSegmentIds = null
     )
     {
         public static bool operator <(RouteResult a, RouteResult b) => a.Distance < b.Distance;

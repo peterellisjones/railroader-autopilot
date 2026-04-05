@@ -1,10 +1,12 @@
 using System.Collections.Generic;
+using System.Linq;
 using Model;
 using Model.AI;
 using Track;
 using Track.Search;
 using Autopilot.Model;
 using Autopilot.Services;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Planning
 {
@@ -13,6 +15,11 @@ namespace Autopilot.Planning
         private readonly TrainService _trainService;
         private readonly PlanningLogger _logger;
         private Dictionary<string, RouteResult?>? _distanceCache;
+
+        // Testable planning fields (used by interface-based constructor path)
+        private readonly ITrainService? _iTrainService;
+        private readonly IGraphAdapter? _iGraph;
+        private readonly IPlanningLogger? _iLogger;
 
         public void ClearCache()
         {
@@ -31,6 +38,17 @@ namespace Autopilot.Planning
         {
             _trainService = trainService;
             _logger = logger;
+        }
+
+        /// <summary>Constructor for testable planning.</summary>
+        public RouteChecker(ITrainService trainService, IGraphAdapter graph, IPlanningLogger logger)
+        {
+            _iTrainService = trainService;
+            _iGraph = graph;
+            _iLogger = logger;
+            // Legacy fields null — old methods won't be called through this path
+            _trainService = null!;
+            _logger = null!;
         }
 
         /// <summary>
@@ -250,6 +268,58 @@ namespace Autopilot.Planning
                 return new RouteResult(metrics.Distance, 0, BlockedByCars: false);
             }
             catch { return null; }
+        }
+
+        // =================================================================
+        // Testable overloads using ITrainService + IGraphAdapter
+        // =================================================================
+
+        /// <summary>
+        /// Check if the loco can route to a destination. Uses IGraphAdapter for routing.
+        /// Checks from both loco front and rear.
+        /// </summary>
+        public bool CanRouteTo(GraphPosition destination)
+        {
+            var locoFront = _iTrainService!.GetLocoFront();
+            var locoRear = _iTrainService.GetLocoRear();
+            var coupledIds = _iTrainService.GetCoupled().Select(c => c.id).ToList();
+
+            var resultF = _iGraph!.FindRoute(locoFront, destination, coupledIds);
+            if (resultF != null && !resultF.Value.BlockedByCars) return true;
+
+            var resultR = _iGraph.FindRoute(locoRear, destination, coupledIds);
+            return resultR != null && !resultR.Value.BlockedByCars;
+        }
+
+        /// <summary>
+        /// Check routability with specific ignored cars.
+        /// </summary>
+        public bool CanRouteTo(GraphPosition destination, float trainLength,
+            IReadOnlyCollection<string> ignoredCarIds)
+        {
+            var locoFront = _iTrainService!.GetLocoFront();
+            var locoRear = _iTrainService.GetLocoRear();
+
+            var resultF = _iGraph!.FindRoute(locoFront, destination, ignoredCarIds);
+            if (resultF != null && !resultF.Value.BlockedByCars) return true;
+
+            var resultR = _iGraph.FindRoute(locoRear, destination, ignoredCarIds);
+            return resultR != null && !resultR.Value.BlockedByCars;
+        }
+
+        /// <summary>Abstract GraphDistanceToLoco.</summary>
+        public RouteResult? GraphDistanceToLoco(GraphPosition target)
+        {
+            var locoFront = _iTrainService!.GetLocoFront();
+            var locoRear = _iTrainService.GetLocoRear();
+            var coupledIds = _iTrainService.GetCoupled().Select(c => c.id).ToList();
+
+            var resultF = _iGraph!.FindRoute(locoFront, target, coupledIds);
+            var resultR = _iGraph.FindRoute(locoRear, target, coupledIds);
+
+            if (resultF == null) return resultR;
+            if (resultR == null) return resultF;
+            return resultF.Value.Distance <= resultR.Value.Distance ? resultF : resultR;
         }
     }
 }
