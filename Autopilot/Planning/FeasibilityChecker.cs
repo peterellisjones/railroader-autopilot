@@ -62,10 +62,16 @@ namespace Autopilot.Planning
             if (!ApproachAnalyzer.CheckApproachDirection(loco, group, destLocation))
                 return false;
 
-            // Convert SpanBoundary to DirectedPosition for route checking
+            // Use trainLength=0 for the route check. The full consist pushes
+            // the tail car to the destination — the loco and remaining cars
+            // trail behind on the approach track. RouteSearch with full
+            // trainLength rejects routes where the siding is shorter than
+            // the consist, but that's normal for switching operations.
+            // We still check for blocking (uncoupled) cars.
             var adapter = new GameGraphAdapter();
             RegisterSegmentById(adapter, destLocation.SegmentId);
-            if (!CanRouteTo(loco, destLocation.ToDirectedPosition(adapter)))
+            if (!CanRouteTo(loco, destLocation.ToDirectedPosition(adapter), 0f,
+                    _trainService.GetCoupled(loco)))
                 return false;
 
             return true;
