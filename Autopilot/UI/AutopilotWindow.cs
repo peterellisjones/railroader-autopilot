@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using UI;
@@ -290,7 +291,8 @@ namespace Autopilot.UI
                 hstack.VStack(fromCol =>
                 {
                     fromCol.FieldLabelWidth = 140f;
-                    fromCol.AddLabel("<b>From</b>");
+                    fromCol.AddLabel("<b>From</b>")
+                        .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     int fromIdx = (int)filter.From.Mode;
                     fromCol.AddDropdown(filterModeLabels, fromIdx, (idx) =>
                     {
@@ -317,7 +319,8 @@ namespace Autopilot.UI
                                 }));
                         }
                         if (_fromOptions.Count == 0)
-                            fromCol.AddLabel("<color=yellow>No options</color>");
+                            fromCol.AddLabel("<color=yellow>No options</color>")
+                                .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     }
                 });
 
@@ -325,7 +328,8 @@ namespace Autopilot.UI
                 hstack.VStack(toCol =>
                 {
                     toCol.FieldLabelWidth = 140f;
-                    toCol.AddLabel("<b>To</b>");
+                    toCol.AddLabel("<b>To</b>")
+                        .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     int toIdx = (int)filter.To.Mode;
                     toCol.AddDropdown(filterModeLabels, toIdx, (idx) =>
                     {
@@ -352,7 +356,8 @@ namespace Autopilot.UI
                                 }));
                         }
                         if (_toOptions.Count == 0)
-                            toCol.AddLabel("<color=yellow>No options</color>");
+                            toCol.AddLabel("<color=yellow>No options</color>")
+                                .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     }
                 });
             });
@@ -373,9 +378,11 @@ namespace Autopilot.UI
             RefreshPickupOptions(loco);
             var summary = BuildFilterSummary(filter, _eligibleCarCount);
             if (_eligibleCarCount == 0)
-                builder.AddLabel($"<color=yellow>{summary}</color>");
+                builder.AddLabel($"<color=yellow>{summary}</color>")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
             else
-                builder.AddLabel(summary);
+                builder.AddLabel(summary)
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
         }
 
         private void CreateWindow()
@@ -458,7 +465,8 @@ namespace Autopilot.UI
             var controller = AutopilotController.Instance;
             if (controller == null)
             {
-                outerBuilder.AddLabel("Autopilot controller not initialized.");
+                outerBuilder.AddLabel("Autopilot controller not initialized.")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                 return;
             }
 
@@ -468,7 +476,8 @@ namespace Autopilot.UI
 
             var loco = TrainController.Shared?.SelectedLocomotive;
             _lastLocoId = loco?.id;
-            builder.AddLabel($"<b>{(loco != null ? loco.DisplayName : "No locomotive selected")}</b>");
+            builder.AddLabel($"<b>{(loco != null ? loco.DisplayName : "No locomotive selected")}</b>")
+                .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
 
             if (loco == null)
                 return;
@@ -656,17 +665,21 @@ namespace Autopilot.UI
 
             // Status
             if (!string.IsNullOrEmpty(sm.StatusMessage))
-                builder.AddLabel(sm.StatusMessage);
+                builder.AddLabel(sm.StatusMessage)
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
 
             if (!string.IsNullOrEmpty(sm.ErrorMessage))
-                builder.AddLabel($"<color=red>{sm.ErrorMessage}</color>");
+                builder.AddLabel($"<color=red>{sm.ErrorMessage}</color>")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
 
             // Pickup progress
             if (sm.Mode == AutopilotMode.Pickup)
             {
-                builder.AddLabel($"Collecting cars for: <b>{sm.PickupFilter?.DisplaySummary ?? "?"}</b>");
+                builder.AddLabel($"Collecting cars for: <b>{sm.PickupFilter?.DisplaySummary ?? "?"}</b>")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                 if (sm.PickupCount > 0)
-                    builder.AddLabel($"Cars collected: {sm.PickupCount}");
+                    builder.AddLabel($"Cars collected: {sm.PickupCount}")
+                        .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
             }
 
             // Plan view — delivery mode only
@@ -677,7 +690,8 @@ namespace Autopilot.UI
                 {
                     if (plan.NeedsRunaround)
                     {
-                        builder.AddLabel($"\u21c4  Runaround to {plan.Runaround.CoupleTarget.DisplayName}");
+                        builder.AddLabel($"\u21c4  Runaround to {plan.Runaround.CoupleTarget.DisplayName}")
+                            .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     }
 
                     if (plan.HasDeliveries)
@@ -703,7 +717,8 @@ namespace Autopilot.UI
                                     _ => "\u25CB"
                                 };
                                 var carNames = string.Join(", ", step.Cars.Select(c => c.DisplayName));
-                                builder.AddLabel($"{icon}  {carNames}  \u2192  {step.DestinationName}");
+                                builder.AddLabel($"{icon}  {carNames}  \u2192  {step.DestinationName}")
+                                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                                 i++;
                                 continue;
                             }
@@ -730,12 +745,14 @@ namespace Autopilot.UI
                             {
                                 // Single step — show car names
                                 var carNames = string.Join(", ", step.Cars.Select(c => c.DisplayName));
-                                builder.AddLabel($"\u25CB  {carNames}  \u2192  {step.DestinationName}");
+                                builder.AddLabel($"\u25CB  {carNames}  \u2192  {step.DestinationName}")
+                                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                             }
                             else
                             {
                                 // Multiple steps same dest — show count
-                                builder.AddLabel($"\u25CB  {totalCars} car(s)  \u2192  {step.DestinationName}");
+                                builder.AddLabel($"\u25CB  {totalCars} car(s)  \u2192  {step.DestinationName}")
+                                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                             }
 
                             shownPending++;
@@ -746,14 +763,16 @@ namespace Autopilot.UI
                         int totalPending = plan.Steps.Count(s => s.Status == StepStatus.Pending);
                         int hiddenPending = totalPending - pendingLines;
                         if (hiddenPending > 0)
-                            builder.AddLabel($"     +{hiddenPending} more");
+                            builder.AddLabel($"     +{hiddenPending} more")
+                                .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     }
 
                     if (plan.Warnings.Count > 0)
                     {
                         builder.AddSection("Notes");
                         foreach (var warning in plan.Warnings)
-                            builder.AddLabel($"<color=yellow>{warning}</color>");
+                            builder.AddLabel($"<color=yellow>{warning}</color>")
+                                .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     }
                 }
             }
