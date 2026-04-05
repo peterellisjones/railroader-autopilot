@@ -69,16 +69,17 @@ namespace Autopilot.Planning
         }
 
         /// <summary>
-        /// Check if a car matches the filter's base criteria: has an active waybill,
+        /// Check if a car matches the filter's base criteria: has a pending waybill,
         /// switchlist membership (if applicable), and To:Destination match.
+        /// A car is "pending" if it has a non-completed waybill OR a completed waybill
+        /// but the car has been moved away from its destination.
         /// Area/Industry checks that require game world data are handled separately
         /// by MatchesFromFilter and MatchesToFilter.
         /// </summary>
         public static bool MatchesFilter(ICar car, PickupFilter filter, HashSet<string> switchlistCarIds)
         {
+            if (!WaybillHelper.IsPendingDelivery(car)) return false;
             var waybill = car.Waybill;
-            if (waybill == null) return false;
-            if (waybill.Value.Completed) return false;
 
             if (filter.From.Mode == Autopilot.Model.FilterMode.Switchlist)
             {
@@ -437,6 +438,12 @@ namespace Autopilot.Planning
             var nearbyCars = _trainService.GetNearbyCars(loco);
             var graph = Graph.Shared;
             var locoPos = loco.GetCenterPosition(graph);
+            var verbose = Loader.Settings?.verboseLogging == true;
+
+            if (verbose)
+                Log($"GetEligibleCars: locoPos=({locoPos.x:F1},{locoPos.y:F1},{locoPos.z:F1}), " +
+                    $"filter From={filter.From.Mode} To={filter.To.Mode} MaxDist={filter.MaxDistance:F0}, " +
+                    $"nearbyCars={nearbyCars.Count}");
 
             HashSet<string> switchlistCarIds;
             if (filter.From.Mode == Autopilot.Model.FilterMode.Switchlist || filter.To.Mode == Autopilot.Model.FilterMode.Switchlist)
@@ -450,22 +457,45 @@ namespace Autopilot.Planning
                 if (filter.MaxDistance < float.MaxValue)
                 {
                     var carPos = car.GetCenterPosition(graph);
-                    if (Vector3.Distance(locoPos, carPos) > filter.MaxDistance)
+                    var dist = Vector3.Distance(locoPos, carPos);
+                    if (dist > filter.MaxDistance)
+                    {
+                        if (verbose)
+                            Log($"  [{car.DisplayName}] SKIP distance: carPos=({carPos.x:F1},{carPos.y:F1},{carPos.z:F1}) dist={dist:F0}m > max={filter.MaxDistance:F0}m");
                         continue;
+                    }
                 }
 
                 var wrapped = (ICar)new CarAdapter(car);
                 if (!MatchesFilter(wrapped, filter, switchlistCarIds))
+                {
+                    if (verbose)
+                    {
+                        var wb = car.Waybill;
+                        bool atDest = wb != null && wb.Value.Completed
+                            && WaybillHelper.IsAtDestination(wrapped, wb.Value.Destination);
+                        Log($"  [{car.DisplayName}] SKIP MatchesFilter: waybill={wb != null}, completed={wb?.Completed ?? false}, atDest={atDest}");
+                    }
                     continue;
+                }
 
                 if (!MatchesFromFilter(car, filter))
+                {
+                    if (verbose) Log($"  [{car.DisplayName}] SKIP MatchesFromFilter");
                     continue;
+                }
 
                 if (!MatchesToFilter(car, filter))
+                {
+                    if (verbose) Log($"  [{car.DisplayName}] SKIP MatchesToFilter");
                     continue;
+                }
 
+                if (verbose) Log($"  [{car.DisplayName}] PASS");
                 result.Add(car);
             }
+
+            if (verbose) Log($"GetEligibleCars: {result.Count} cars matched");
             return result;
         }
 

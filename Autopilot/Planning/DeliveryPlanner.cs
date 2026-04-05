@@ -212,8 +212,7 @@ namespace Autopilot.Planning
                 var seenDestIds = new HashSet<string>();
                 foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
                 {
-                    if (car.Waybill == null) continue;
-                    if (car.Waybill.Value.Completed) continue;
+                    if (!WaybillHelper.IsPendingDelivery(car)) continue;
                     if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
                     var dest = car.Waybill.Value.Destination;
                     if (!seenDestIds.Add(dest.Identifier)) continue;

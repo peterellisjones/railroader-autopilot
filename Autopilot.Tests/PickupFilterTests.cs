@@ -159,8 +159,9 @@ namespace Autopilot.Tests
         }
 
         [Test]
-        public void MatchesCar_completed_waybill_does_not_match()
+        public void MatchesCar_completed_waybill_displaced_from_destination_matches()
         {
+            // Completed waybill, but car is not at destination (null segments = displaced)
             var car = new MockCar
             {
                 id = "c1",
@@ -168,7 +169,7 @@ namespace Autopilot.Tests
                 Waybill = new Waybill(default, null, TestOpsCarPosition("Mill S1", "mill-s1"), 0, true, null, 0)
             };
             var filter = PickupFilter.Default;
-            Assert.IsFalse(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
+            Assert.IsTrue(PickupPlanner.MatchesFilter(car, filter, new HashSet<string>()));
         }
 
         [Test]
