@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Model;
+using System.Linq;
 using Autopilot.Model;
 using Autopilot.TrackGraph;
 
@@ -120,16 +120,80 @@ namespace Autopilot.Tests
             return null;
         }
 
-        public RouteResult? FindRoute(DirectedPosition from, DirectedPosition to,
-            IReadOnlyCollection<Car>? ignoredCars = null, bool checkForCars = true)
+        public RouteResult? FindRoute(GraphPosition from, GraphPosition to,
+            IReadOnlyCollection<string>? ignoredCarIds = null, bool checkForCars = true)
         {
+            // Stub — BFS implementation comes in Task 4
             return null;
         }
 
-        public RouteResult? FindBestRoute(TrackPosition from, DirectedPosition to,
-            IReadOnlyCollection<Car>? ignoredCars = null, bool checkForCars = true)
+        public RouteResult? FindBestRoute(UndirectedGraphPosition from, GraphPosition to,
+            IReadOnlyCollection<string>? ignoredCarIds = null, bool checkForCars = true)
         {
+            // Stub — BFS implementation comes in Task 4
             return null;
+        }
+
+        public string? FindSharedNode(string segmentIdA, string segmentIdB)
+        {
+            if (!_segments.TryGetValue(segmentIdA, out var segA)) return null;
+            if (!_segments.TryGetValue(segmentIdB, out var segB)) return null;
+
+            if (segA.NodeA != null && (segA.NodeA == segB.NodeA || segA.NodeA == segB.NodeB))
+                return segA.NodeA;
+            if (segA.NodeB != null && (segA.NodeB == segB.NodeA || segA.NodeB == segB.NodeB))
+                return segA.NodeB;
+            return null;
+        }
+
+        public bool? DirectionTowardIsEndA(string fromSegmentId, string toSegmentId, int maxHops = 5)
+        {
+            if (fromSegmentId == toSegmentId) return null;
+
+            // Try walking from End A
+            if (WalkToward(fromSegmentId, true, toSegmentId, maxHops))
+                return true;
+
+            // Try walking from End B
+            if (WalkToward(fromSegmentId, false, toSegmentId, maxHops))
+                return false;
+
+            return null;
+        }
+
+        private bool WalkToward(string startSegId, bool startEndA, string targetSegId, int maxHops)
+        {
+            var currentSegId = startSegId;
+            var currentEndA = startEndA;
+
+            for (int hop = 0; hop < maxHops; hop++)
+            {
+                var nodeId = GetNodeAtEnd(currentSegId, currentEndA);
+                if (nodeId == null) return false;
+
+                if (IsSwitch(nodeId))
+                {
+                    var (enter, exitNormal, exitReverse) = GetSwitchLegs(nodeId);
+                    var candidates = new[] { enter, exitNormal, exitReverse }
+                        .Where(s => s != null && s != currentSegId);
+                    foreach (var nextSegId in candidates)
+                    {
+                        if (nextSegId == targetSegId) return true;
+                    }
+                    return false;
+                }
+                else
+                {
+                    var nextSegId = GetReachableSegment(currentSegId, currentEndA);
+                    if (nextSegId == null) return false;
+                    if (nextSegId == targetSegId) return true;
+
+                    var nextNodeA = GetNodeAtEnd(nextSegId, true);
+                    currentEndA = nextNodeA != nodeId;
+                    currentSegId = nextSegId;
+                }
+            }
+            return false;
         }
     }
 }

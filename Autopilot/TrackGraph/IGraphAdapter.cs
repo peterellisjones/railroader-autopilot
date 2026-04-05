@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Model;
 using Autopilot.Model;
 
 namespace Autopilot.TrackGraph
@@ -53,15 +52,28 @@ namespace Autopilot.TrackGraph
         /// and whether the route was blocked by cars.
         /// Returns null if no route exists.
         /// </summary>
-        RouteResult? FindRoute(DirectedPosition from, DirectedPosition to,
-            IReadOnlyCollection<Car>? ignoredCars = null, bool checkForCars = true);
+        RouteResult? FindRoute(GraphPosition from, GraphPosition to,
+            IReadOnlyCollection<string>? ignoredCarIds = null, bool checkForCars = true);
 
         /// <summary>
         /// Find the best (shortest) route from an undirected position to a directed destination,
         /// trying both facing directions from the start.
         /// Returns null if no route exists in either direction.
         /// </summary>
-        RouteResult? FindBestRoute(TrackPosition from, DirectedPosition to,
-            IReadOnlyCollection<Car>? ignoredCars = null, bool checkForCars = true);
+        RouteResult? FindBestRoute(UndirectedGraphPosition from, GraphPosition to,
+            IReadOnlyCollection<string>? ignoredCarIds = null, bool checkForCars = true);
+
+        // Node navigation
+
+        /// <summary>
+        /// Find the node shared between two adjacent segments, or null if not adjacent.
+        /// </summary>
+        string? FindSharedNode(string segmentIdA, string segmentIdB);
+
+        /// <summary>
+        /// Determine which end of fromSegment leads toward toSegment (walking up to maxHops).
+        /// Returns true if End A leads toward toSegment, false if End B, null if not reachable.
+        /// </summary>
+        bool? DirectionTowardIsEndA(string fromSegmentId, string toSegmentId, int maxHops = 5);
     }
 }
