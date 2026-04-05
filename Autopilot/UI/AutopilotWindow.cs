@@ -106,9 +106,11 @@ namespace Autopilot.UI
             {
                 yield return wait;
 
-                var currentLocoId = TrainController.Shared?.SelectedLocomotive?.id;
+                var currentLoco = TrainController.Shared?.SelectedLocomotive;
+                var currentLocoId = currentLoco?.id;
                 if (currentLocoId != _lastLocoId)
                 {
+                    RestoreLocoState(currentLoco);
                     _lastLocoId = currentLocoId;
                     RebuildPanel();
                     continue;
@@ -146,6 +148,9 @@ namespace Autopilot.UI
         {
             if (!_isOpen || _panel == null) return;
 
+            // Persist filter/mode state for the current loco
+            SaveLocoState();
+
             // Save scroll position before rebuild
             var scrollRect = _window.contentRectTransform.GetComponentInChildren<ScrollRect>();
             if (scrollRect != null)
@@ -163,6 +168,33 @@ namespace Autopilot.UI
             var scrollRect = _window?.contentRectTransform?.GetComponentInChildren<ScrollRect>();
             if (scrollRect != null)
                 scrollRect.verticalNormalizedPosition = _scrollPosition;
+        }
+
+        private void SaveLocoState()
+        {
+            var loco = TrainController.Shared?.SelectedLocomotive;
+            if (loco == null) return;
+            TrainSvc.SaveSelectedMode(loco, _selectedMode);
+            TrainSvc.SavePickupFilter(loco, _pickupFilter);
+        }
+
+        private void RestoreLocoState(BaseLocomotive loco)
+        {
+            if (loco != null)
+            {
+                _selectedMode = TrainSvc.GetSelectedMode(loco);
+                _pickupFilter = TrainSvc.GetPickupFilter(loco);
+                _deliverAfterPickup = false;
+            }
+            else
+            {
+                _selectedMode = AutopilotMode.Delivery;
+                _pickupFilter = PickupFilter.Default;
+                _deliverAfterPickup = false;
+            }
+            _fromOptions.Clear();
+            _toOptions.Clear();
+            _eligibleCarCount = 0;
         }
 
         private void OnStateChanged()

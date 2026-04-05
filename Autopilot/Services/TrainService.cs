@@ -28,6 +28,8 @@ namespace Autopilot.Services
         private const string ContextKey = "autopilot.context";
         private const string DeliverAfterPickupKey = "autopilot.deliverAfterPickup";
         private const string AutoRefuelEnabledKey = "autopilot.autoRefuelEnabled";
+        private const string PickupFilterKey = "autopilot.pickupFilter";
+        private const string SelectedModeKey = "autopilot.selectedMode";
 
         // Per-plan-cycle caches — cleared by DeliveryPlanner.BuildPlan()
         private List<Car>? _cachedCoupled;
@@ -215,6 +217,32 @@ namespace Autopilot.Services
         public void SetAutoRefuelEnabled(BaseLocomotive loco, bool enabled)
         {
             loco.KeyValueObject[AutoRefuelEnabledKey] = Value.Bool(enabled);
+        }
+
+        public void SavePickupFilter(BaseLocomotive loco, PickupFilter filter)
+        {
+            loco.KeyValueObject[PickupFilterKey] = Value.String(filter.Serialize());
+        }
+
+        public PickupFilter GetPickupFilter(BaseLocomotive loco)
+        {
+            var value = loco.KeyValueObject[PickupFilterKey];
+            if (value.IsNull)
+                return PickupFilter.Default;
+            return PickupFilter.Deserialize(value.StringValue);
+        }
+
+        public void SaveSelectedMode(BaseLocomotive loco, AutopilotMode mode)
+        {
+            loco.KeyValueObject[SelectedModeKey] = Value.Int((int)mode);
+        }
+
+        public AutopilotMode GetSelectedMode(BaseLocomotive loco)
+        {
+            var value = loco.KeyValueObject[SelectedModeKey];
+            if (value.IsNull)
+                return AutopilotMode.Delivery;
+            return (AutopilotMode)value.IntValue;
         }
 
         /// <summary>
