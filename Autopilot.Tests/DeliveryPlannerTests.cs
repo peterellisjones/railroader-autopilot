@@ -327,5 +327,80 @@ namespace Autopilot.Tests
                 "Non-waybilled car at tail should not block waybilled car behind it");
             Assert.That(plan.Steps[0].Cars[0].id, Is.EqualTo("carB"));
         }
+
+        // 2.0: Route completely blocked — neither runaround nor split can help.
+        //      Planner should NOT reposition.
+        [Test]
+        public void RouteBlocked_noViableAction_skipsReposition()
+        {
+            var scenario = new ScenarioBuilder()
+                .AddSegment("lead", "n0", "sw1", 500)
+                .AddSegment("approach", "sw1", "sw2", 200)
+                .AddSegment("siding", "sw2", "n2", 100)
+                .AddSwitch("sw1", "lead", "approach", "approach")
+                .AddSwitch("sw2", "approach", "siding", "siding")
+                .PlaceCar("carA", "approach", 50, Direction.TowardEndB, destination: "siding")
+                .PlaceLoco("loco", "lead", 300, Direction.TowardEndB, coupledTo: "carA")
+                .DefineDestination("siding", "Siding R1", 100f,
+                    new GraphPosition("siding", 10, Direction.TowardEndB))
+                .SetLoopStatus(LoopStatus.NotOnLoop())
+                .SetRepositionResult(
+                    new GraphPosition("lead", 100, Direction.TowardEndB), "loop1")
+                .Build();
+
+            // Block the siding — route is completely unreachable.
+            // Even a split can't help if no route exists.
+            scenario.GraphAdapter.BlockSegment("siding");
+
+            var planner = new DeliveryPlanner(scenario.TrainService, scenario.GraphAdapter);
+            var plan = planner.BuildPlan();
+
+            Assert.That(plan.HasDeliveries, Is.False,
+                "No direct deliveries (route blocked)");
+            Assert.That(plan.NeedsReposition, Is.False,
+                "Should NOT reposition — route is completely blocked, neither runaround nor split helps");
+        }
+
+        // 2.1: When flipped side IS deliverable and not on loop,
+        //      reposition reason should say "runaround".
+        [Test]
+        public void FlippedDeliverable_notOnLoop_repositionsForRunaround()
+        {
+            // carA (tail) waybilled to siding1 (blocked).
+            // carB (loco-end) waybilled to siding2 (NOT blocked).
+            // Flipped sideB: carB becomes new tail → can deliver → runaround needed.
+            var scenario = new ScenarioBuilder()
+                .AddSegment("lead", "n0", "sw1", 500)
+                .AddSegment("approach", "sw1", "sw2", 200)
+                .AddSegment("siding1", "sw2", "n2", 100)
+                .AddSegment("siding2", "sw2", "n3", 100)
+                .AddSwitch("sw1", "lead", "approach", "approach")
+                .AddSwitch("sw2", "approach", "siding1", "siding2")
+                .PlaceCar("carA", "approach", 50, Direction.TowardEndB, destination: "siding1")
+                .PlaceCar("carB", "approach", 100, Direction.TowardEndB, destination: "siding2",
+                    coupledTo: "carA")
+                .PlaceLoco("loco", "lead", 300, Direction.TowardEndB, coupledTo: "carB")
+                .DefineDestination("siding1", "Siding R1", 100f,
+                    new GraphPosition("siding1", 10, Direction.TowardEndB))
+                .DefineDestination("siding2", "Siding R2", 100f,
+                    new GraphPosition("siding2", 10, Direction.TowardEndB))
+                .SetLoopStatus(LoopStatus.NotOnLoop())
+                .SetRepositionResult(
+                    new GraphPosition("lead", 100, Direction.TowardEndB), "loop1")
+                .Build();
+
+            // Block only siding1 — siding2 remains reachable
+            scenario.GraphAdapter.BlockSegment("siding1");
+
+            var planner = new DeliveryPlanner(scenario.TrainService, scenario.GraphAdapter);
+            var plan = planner.BuildPlan();
+
+            Assert.That(plan.HasDeliveries, Is.False,
+                "No direct deliveries (carA can't reach siding1)");
+            Assert.That(plan.NeedsReposition, Is.True,
+                "Should reposition — flipped sideB can deliver carB to siding2");
+            Assert.That(plan.Reason, Does.Contain("runaround"),
+                "Reason should say 'runaround' when flipped side can deliver");
+        }
     }
 }

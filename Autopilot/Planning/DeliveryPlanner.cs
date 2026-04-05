@@ -57,6 +57,20 @@ namespace Autopilot.Planning
 
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot Planner: {msg}");
 
+        private static void RegisterSegmentById(TrackGraph.GameGraphAdapter adapter, string segmentId)
+        {
+            if (segmentId == null) return;
+            var graph = Graph.Shared;
+            foreach (var seg in graph.Segments)
+            {
+                if (seg.id == segmentId)
+                {
+                    adapter.RegisterSegment(seg);
+                    return;
+                }
+            }
+        }
+
         public DeliveryPlan BuildPlan(BaseLocomotive loco,
             IEnumerable<string>? visitedSwitches = null,
             IEnumerable<string>? visitedLoopKeys = null,
@@ -191,9 +205,53 @@ namespace Autopilot.Planning
                 }
             }
 
-            if (hasDeliverableCars && !loopStatus.CanRunaround)
+            bool anyFlippedDeliverable = flippedStepsA.Count > 0 || flippedStepsB.Count > 0;
+
+            // Check if a split would help: try routing to each destination
+            // with the minimum possible split train (loco + tail car only).
+            // If the route works with that shorter length, splitting is viable.
+            bool splitViable = false;
+            string splitDestName = null;
+            if (!anyFlippedDeliverable && hasDeliverableCars)
             {
-                Log("No runarounds feasible — checking reposition to loop...");
+                var coupled = _trainService.GetCoupled(loco);
+                var adapter = new TrackGraph.GameGraphAdapter();
+                foreach (var side in new[] { layout.SideA, layout.SideB })
+                {
+                    if (side.IsEmpty) continue;
+                    // Iterate from loco end (last in Cars list) to match
+                    // SplitFinder, which keeps loco-end cars and drops tail.
+                    for (int ci = side.Cars.Count - 1; ci >= 0; ci--)
+                    {
+                        var car = side.Cars[ci];
+                        if (car.Waybill == null) continue;
+                        if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
+                        var dest = car.Waybill.Value.Destination;
+                        var candidates = _destinationSelector.GetDestinationCandidates(dest, loco);
+                        float splitLen = loco.carLength + car.CarLength + AutopilotConstants.ConsistGapPerCar;
+                        foreach (var c in candidates)
+                        {
+                            if (c.availableSpace < 2f) continue;
+                            RegisterSegmentById(adapter, c.approachTarget.SegmentId);
+                            if (_checker.CanRouteTo(loco, c.approachTarget.ToDirectedPosition(adapter), splitLen, coupled))
+                            {
+                                splitViable = true;
+                                splitDestName = dest.DisplayName;
+                                Log($"Split viable: {dest.DisplayName} reachable at {splitLen:F0}m (full train {_trainService.GetTrainLength(loco):F0}m)");
+                                break;
+                            }
+                        }
+                        if (splitViable) break;
+                    }
+                    if (splitViable) break;
+                }
+                if (!splitViable)
+                    Log("Split not viable — even shortest split train can't reach any destination");
+            }
+
+            if (hasDeliverableCars && !loopStatus.CanRunaround && (anyFlippedDeliverable || splitViable))
+            {
+                Log("Not on loop — checking reposition...");
 
                 var deliveryDests = new List<SpanBoundary>();
                 var seenDestIds = new HashSet<string>();
@@ -220,24 +278,24 @@ namespace Autopilot.Planning
                 var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDests);
                 if (repositionLoc.HasValue)
                 {
-                    string destName = null;
-                    if (scoreA > 0 && flippedStepsA.Count > 0)
-                        destName = flippedStepsA[0].DestinationName;
-                    else if (scoreB > 0 && flippedStepsB.Count > 0)
-                        destName = flippedStepsB[0].DestinationName;
+                    string destName;
+                    string action;
+                    if (anyFlippedDeliverable)
+                    {
+                        action = "runaround";
+                        destName = null;
+                        if (scoreA > 0 && flippedStepsA.Count > 0)
+                            destName = flippedStepsA[0].DestinationName;
+                        else if (scoreB > 0 && flippedStepsB.Count > 0)
+                            destName = flippedStepsB[0].DestinationName;
+                    }
                     else
                     {
-                        foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
-                        {
-                            if (car.Waybill != null && (skippedCarIds == null || !skippedCarIds.Contains(car.id)))
-                            {
-                                destName = car.Waybill.Value.Destination.DisplayName;
-                                break;
-                            }
-                        }
+                        action = "split";
+                        destName = splitDestName;
                     }
                     string reason = destName != null
-                        ? $"Repositioning to loop (need runaround to deliver to {destName})"
+                        ? $"Repositioning to loop (need {action} to deliver to {destName})"
                         : "Repositioning to loop";
 
                     // Convert DirectedPosition to GraphPosition for the plan
@@ -422,9 +480,15 @@ namespace Autopilot.Planning
                     reason: $"Delivering {bestSteps[0].CarNames} to {bestSteps[0].DestinationName}");
             }
 
-            // No direct deliveries available.
-            // In the full planner this falls through to runaround/reposition/split.
-            // For now, check if there are any deliverable cars at all and report accordingly.
+            // No direct deliveries — check if flipping either side
+            // (runaround) would produce deliverable steps.
+            var flippedA = layout.SideA.Reversed();
+            var flippedB = layout.SideB.Reversed();
+            var flippedStepsA2 = _iAnalyzer.GetDeliverableSteps(flippedA, _iChecker!, skippedCarIds, maxSteps: 3);
+            var flippedStepsB2 = _iAnalyzer.GetDeliverableSteps(flippedB, _iChecker!, skippedCarIds, maxSteps: 3);
+
+            var loopStatus = _iTrainService.GetLoopStatus();
+
             bool hasDeliverableCars = false;
             foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
             {
@@ -438,11 +502,57 @@ namespace Autopilot.Planning
                 }
             }
 
-            if (hasDeliverableCars)
+            bool anyFlippedDeliverable2 = flippedStepsA2.Count > 0 || flippedStepsB2.Count > 0;
+
+            // Check split viability: in the abstract path, CanRouteTo doesn't
+            // model train length. If a route is completely blocked (CanRouteTo
+            // fails), split can't help. Check if any destination is routable.
+            bool splitViable2 = false;
+            if (!anyFlippedDeliverable2 && hasDeliverableCars)
             {
-                warnings.Add("No direct delivery possible — runaround/reposition needed (not yet supported in abstract path).");
+                foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
+                {
+                    if (!_iTrainService.HasWaybill(car)) continue;
+                    if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
+                    var candidates = _iTrainService.GetDestinationCandidates(car);
+                    foreach (var c in candidates)
+                    {
+                        if (_iChecker!.RouteChecker.CanRouteTo(c.ApproachTarget))
+                        {
+                            splitViable2 = true;
+                            break;
+                        }
+                    }
+                    if (splitViable2) break;
+                }
             }
-            else
+
+            if (hasDeliverableCars && !loopStatus.CanRunaround
+                && (anyFlippedDeliverable2 || splitViable2))
+            {
+                var deliveryDests = new List<GraphPosition>();
+                foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
+                {
+                    if (!_iTrainService.HasWaybill(car)) continue;
+                    if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
+                    var candidates = _iTrainService.GetDestinationCandidates(car);
+                    if (candidates.Count > 0)
+                        deliveryDests.Add(candidates[0].ApproachTarget);
+                }
+
+                var (repositionLoc, loopKey) = _iTrainService.GetRepositionLocation(
+                    visitedSwitches, visitedLoopKeys, deliveryDests);
+                if (repositionLoc.HasValue)
+                {
+                    string action = anyFlippedDeliverable2 ? "runaround" : "split";
+                    return new DeliveryPlan(new List<DeliveryStep>(), warnings,
+                        repositionLocation: repositionLoc.Value,
+                        reason: $"Repositioning to loop (need {action})",
+                        repositionLoopKey: loopKey);
+                }
+            }
+
+            if (!hasDeliverableCars)
             {
                 warnings.Add("No deliverable cars found.");
             }
