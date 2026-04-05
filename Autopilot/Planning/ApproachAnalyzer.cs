@@ -5,6 +5,7 @@ using Track;
 using Track.Search;
 using Autopilot.Model;
 using Autopilot.Services;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Planning
 {
@@ -15,10 +16,23 @@ namespace Autopilot.Planning
         private readonly RouteChecker _routeChecker;
         private readonly PlanningLogger _logger;
 
+        // Testable planning fields (used by interface-based constructor path)
+        private readonly IGraphAdapter? _iGraph;
+        private readonly IPlanningLogger? _iLogger;
+
         public ApproachAnalyzer(RouteChecker routeChecker, PlanningLogger logger)
         {
             _routeChecker = routeChecker;
             _logger = logger;
+        }
+
+        /// <summary>Constructor for testable planning.</summary>
+        public ApproachAnalyzer(RouteChecker routeChecker, IGraphAdapter graph, IPlanningLogger logger)
+        {
+            _routeChecker = routeChecker;
+            _iGraph = graph;
+            _iLogger = logger;
+            _logger = null!;
         }
 
         /// <summary>
@@ -223,6 +237,90 @@ namespace Autopilot.Planning
             }
 
             return false;
+        }
+
+        // =================================================================
+        // Testable overloads using IGraphAdapter + GraphPosition
+        // =================================================================
+
+        /// <summary>
+        /// Check approach direction with explicit tail positions (GraphPosition).
+        /// This is the fully abstract version — no game types needed.
+        /// tailLeads = tailFacesDest XOR oddReversals
+        /// </summary>
+        public bool CheckApproachDirection(GraphPosition tailOutward, GraphPosition tailInward,
+            GraphPosition destLocation)
+        {
+            int reversals = 0;
+            bool tailFacesDest = true;
+
+            if (tailOutward.SegmentId != null)
+            {
+                // Try both directions from tail position (outward and flipped)
+                var outwardResult = _iGraph!.FindRoute(tailOutward, destLocation, checkForCars: false);
+                var flippedResult = _iGraph.FindRoute(tailOutward.Flipped, destLocation, checkForCars: false);
+
+                bool useOutward = outwardResult != null
+                    && (flippedResult == null || outwardResult.Value.Distance <= flippedResult.Value.Distance);
+                var bestResult = useOutward ? outwardResult : flippedResult;
+
+                if (bestResult != null && bestResult.Value.RouteSegmentIds != null
+                    && bestResult.Value.RouteSegmentIds.Count >= 2)
+                {
+                    var route = bestResult.Value.RouteSegmentIds;
+
+                    // Determine if route exits outward from the tail
+                    tailFacesDest = RouteGoesOutward(tailOutward, tailInward, route);
+
+                    reversals = bestResult.Value.ReversalCount;
+                }
+            }
+
+            bool oddReversals = (reversals % 2 == 1);
+            bool tailLeads = tailFacesDest != oddReversals;
+
+            _iLogger?.LogDebug("CheckApproach", $"tailFacesDest={tailFacesDest}, " +
+                $"reversals={reversals}, tailLeads={tailLeads} (dest={destLocation.SegmentId})");
+
+            return tailLeads;
+        }
+
+        /// <summary>
+        /// Determine if a route exits the starting segment in the outward direction.
+        /// Uses IGraphAdapter for node lookups instead of game types.
+        /// </summary>
+        private bool RouteGoesOutward(GraphPosition outward, GraphPosition inward,
+            IReadOnlyList<string> routeSegments)
+        {
+            if (routeSegments == null || routeSegments.Count < 2) return true;
+
+            // Find the node between the first two segments of the route
+            var exitNode = _iGraph!.FindSharedNode(routeSegments[0], routeSegments[1]);
+            if (exitNode == null) return true;
+
+            if (outward.SegmentId == inward.SegmentId)
+            {
+                // Same segment: outward end is farther from inward
+                bool outwardIsEndB = outward.DistanceFromA > inward.DistanceFromA;
+                // Route exits at End A of the segment if the exit node is at End A
+                bool routeExitsEndA = _iGraph.IsEndA(routeSegments[0], exitNode);
+                // Route goes outward if it exits toward the outward end
+                return outwardIsEndB ? !routeExitsEndA : routeExitsEndA;
+            }
+            else
+            {
+                // Different segments: find connection between outward and inward segments
+                var connectNode = _iGraph.FindSharedNode(outward.SegmentId, inward.SegmentId);
+                if (connectNode != null)
+                {
+                    bool connectIsEndA = _iGraph.IsEndA(outward.SegmentId, connectNode);
+                    bool routeExitsEndA = _iGraph.IsEndA(routeSegments[0], exitNode);
+                    // Outward direction is AWAY from the connection
+                    return routeExitsEndA != connectIsEndA;
+                }
+            }
+
+            return true; // default
         }
 
         // --- Private helpers ---

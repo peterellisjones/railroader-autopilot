@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Track;
 using Track.Search;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Planning
 {
@@ -67,6 +68,35 @@ namespace Autopilot.Planning
                     reversals++;
             }
 
+            return reversals;
+        }
+
+        /// <summary>
+        /// Count reversals from a list of segment IDs using IGraphAdapter.
+        /// A switch visited N times contributes N-1 reversals.
+        /// </summary>
+        public static int FromSegmentIds(IReadOnlyList<string> route, IGraphAdapter graph)
+        {
+            if (route.Count < 3) return 0;
+            int reversals = 0;
+            var switchVisits = new Dictionary<string, int>();
+
+            for (int i = 0; i < route.Count - 1; i++)
+            {
+                var sharedNode = graph.FindSharedNode(route[i], route[i + 1]);
+                if (sharedNode != null && graph.IsSwitch(sharedNode))
+                {
+                    if (switchVisits.ContainsKey(sharedNode))
+                        switchVisits[sharedNode]++;
+                    else
+                        switchVisits[sharedNode] = 1;
+                }
+            }
+
+            foreach (var kv in switchVisits)
+            {
+                if (kv.Value > 1) reversals += kv.Value - 1;
+            }
             return reversals;
         }
 
