@@ -11,11 +11,18 @@ namespace Autopilot.Planning
 {
     public class DeliverabilityAnalyzer
     {
-        private readonly DestinationSelector _destinationSelector;
+        private readonly DestinationSelector? _destinationSelector;
+        private readonly ITrainService? _iTrainService;
 
         public DeliverabilityAnalyzer(DestinationSelector destinationSelector)
         {
             _destinationSelector = destinationSelector;
+        }
+
+        /// <summary>Constructor for testable planning.</summary>
+        public DeliverabilityAnalyzer(ITrainService trainService)
+        {
+            _iTrainService = trainService;
         }
 
         public List<DeliveryStep> GetDeliverableSteps(BaseLocomotive loco, CarGroup group,
@@ -45,7 +52,7 @@ namespace Autopilot.Planning
                 List<(DirectedPosition loc, Car coupleTo, float availableSpace, int spanIndex, SpanBoundary approachTarget)> destCandidates;
                 try
                 {
-                    destCandidates = _destinationSelector.GetDestinationCandidates(destination, loco);
+                    destCandidates = _destinationSelector!.GetDestinationCandidates(destination, loco);
                 }
                 catch
                 {
@@ -134,6 +141,113 @@ namespace Autopilot.Planning
 
                 steps.Add(new DeliveryStep(carGroup, destination.Identifier, destination.DisplayName,
                     destGp, coupleTargetICar, selectedSpanIndex));
+                if (steps.Count >= maxSteps)
+                    return steps;
+                i += carGroup.Count;
+            }
+
+            return steps;
+        }
+
+        // =================================================================
+        // Testable overload using ITrainService (no game types)
+        // =================================================================
+
+        /// <summary>
+        /// Get deliverable steps using ITrainService for destination queries.
+        /// Uses FeasibilityChecker's abstract CanDeliver overload for feasibility checks.
+        /// </summary>
+        public List<DeliveryStep> GetDeliverableSteps(CarGroup group,
+            FeasibilityChecker checker, IReadOnlyCollection<string>? skippedCarIds = null,
+            int maxSteps = int.MaxValue)
+        {
+            var steps = new List<DeliveryStep>();
+            if (group.IsEmpty || _iTrainService == null) return steps;
+
+            int i = 0;
+            while (i < group.Cars.Count)
+            {
+                var car = group.Cars[i];
+
+                // A skipped car (siding overflow) blocks access to cars behind it.
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id))
+                    break;
+
+                if (!_iTrainService.HasWaybill(car))
+                {
+                    i++;
+                    continue;
+                }
+
+                var destTrackId = _iTrainService.GetDestinationTrackId(car);
+                var destName = _iTrainService.GetDestinationName(car);
+                if (destTrackId == null || destName == null)
+                {
+                    i++;
+                    continue;
+                }
+
+                var candidates = _iTrainService.GetDestinationCandidates(car);
+                if (candidates.Count == 0)
+                {
+                    i++;
+                    continue;
+                }
+
+                GraphPosition destLocation = default;
+                ICar? coupleTarget = null;
+                float availableSpace = 0f;
+                int selectedSpanIndex = 0;
+                bool foundDest = false;
+                var failedSpans = new HashSet<int>();
+
+                foreach (var candidate in candidates)
+                {
+                    if (candidate.Location.SegmentId == null) continue;
+                    if (candidate.AvailableSpace < 2f) continue;
+                    if (failedSpans.Contains(candidate.SpanIndex)) continue;
+
+                    // Use the abstract CanDeliver that takes GraphPositions
+                    if (group.TailOutwardEnd.HasValue && group.TailInwardEnd.HasValue
+                        && checker.CanDeliver(group.TailOutwardEnd.Value,
+                            group.TailInwardEnd.Value, candidate.ApproachTarget))
+                    {
+                        destLocation = candidate.Location;
+                        coupleTarget = candidate.CoupleTarget;
+                        availableSpace = candidate.AvailableSpace;
+                        selectedSpanIndex = candidate.SpanIndex;
+                        foundDest = true;
+                        break;
+                    }
+                    else
+                    {
+                        failedSpans.Add(candidate.SpanIndex);
+                    }
+                }
+
+                if (!foundDest)
+                    break;
+
+                // Group consecutive cars going to the same destination track.
+                var carGroup = new List<ICar> { car };
+                float usedSpace = 0f;
+                while (i + carGroup.Count < group.Cars.Count)
+                {
+                    var nextCar = group.Cars[i + carGroup.Count];
+                    if (!_iTrainService.HasWaybill(nextCar))
+                        break;
+                    var nextDestTrackId = _iTrainService.GetDestinationTrackId(nextCar);
+                    if (nextDestTrackId != destTrackId)
+                        break;
+                    var prevCar = carGroup[carGroup.Count - 1];
+                    usedSpace += prevCar.CarLength + AutopilotConstants.ConsistGapPerCar;
+                    if (usedSpace + 2f > availableSpace)
+                        break;
+                    carGroup.Add(nextCar);
+                }
+
+                steps.Add(new DeliveryStep(carGroup, destTrackId, destName,
+                    destLocation, coupleTarget, selectedSpanIndex));
                 if (steps.Count >= maxSteps)
                     return steps;
                 i += carGroup.Count;

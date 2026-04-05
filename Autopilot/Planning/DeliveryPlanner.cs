@@ -6,6 +6,7 @@ using Track;
 using Track.Search;
 using Autopilot.Model;
 using Autopilot.Services;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Planning
 {
@@ -17,6 +18,12 @@ namespace Autopilot.Planning
         private readonly DeliverabilityAnalyzer _deliverabilityAnalyzer;
         private readonly RunaroundBuilder _runaroundBuilder;
 
+        // Testable planning fields (used by interface-based constructor path)
+        private readonly ITrainService? _iTrainService;
+        private readonly IGraphAdapter? _iGraph;
+        private readonly FeasibilityChecker? _iChecker;
+        private readonly DeliverabilityAnalyzer? _iAnalyzer;
+
         public DeliveryPlanner(TrainService trainService)
         {
             _trainService = trainService;
@@ -24,6 +31,20 @@ namespace Autopilot.Planning
             _destinationSelector = new DestinationSelector(trainService, _checker.RouteChecker);
             _deliverabilityAnalyzer = new DeliverabilityAnalyzer(_destinationSelector);
             _runaroundBuilder = new RunaroundBuilder(_deliverabilityAnalyzer);
+        }
+
+        /// <summary>Constructor for testable planning.</summary>
+        public DeliveryPlanner(ITrainService trainService, IGraphAdapter graph)
+        {
+            _iTrainService = trainService;
+            _iGraph = graph;
+            _iChecker = new FeasibilityChecker(trainService, graph);
+            _iAnalyzer = new DeliverabilityAnalyzer(trainService);
+            _trainService = null!;
+            _checker = null!;
+            _destinationSelector = null!;
+            _deliverabilityAnalyzer = null!;
+            _runaroundBuilder = null!;
         }
 
         private void ClearCaches()
@@ -352,6 +373,138 @@ namespace Autopilot.Planning
                 }
             }
             return adapter.ToDirectedPosition(gp);
+        }
+
+        // =================================================================
+        // Testable BuildPlan using ITrainService + IGraphAdapter
+        // =================================================================
+
+        /// <summary>
+        /// Build a delivery plan using abstract interfaces (no game types).
+        /// Covers the core planning logic: consist layout, deliverability analysis,
+        /// same-destination consolidation check, and direct delivery selection.
+        /// Runaround/reposition/split branches are deferred to a later task.
+        /// </summary>
+        public DeliveryPlan BuildPlan(
+            IEnumerable<string>? visitedSwitches = null,
+            IEnumerable<string>? visitedLoopKeys = null,
+            IReadOnlyCollection<string>? skippedCarIds = null)
+        {
+            _iTrainService!.ClearPlanCaches();
+            var layout = ConsistLayout.Create(_iTrainService);
+            var warnings = new List<string>();
+
+            if (!layout.HasWaybilledCars)
+            {
+                return new DeliveryPlan(new List<DeliveryStep>(), warnings);
+            }
+
+            // Check both sides for direct deliveries.
+            var stepsA = _iAnalyzer!.GetDeliverableSteps(layout.SideA, _iChecker!, skippedCarIds, maxSteps: 1);
+            var stepsB = _iAnalyzer.GetDeliverableSteps(layout.SideB, _iChecker!, skippedCarIds, maxSteps: 1);
+
+            bool needsConsolidation = SidesShareDestinationAbstract(
+                layout.SideA, layout.SideB, _iTrainService, skippedCarIds);
+
+            if (needsConsolidation)
+            {
+                // Both sides have cars for the same destination.
+                // In the full planner this triggers runaround logic.
+                // For now, return empty steps with an informational warning.
+                warnings.Add("Both sides have cars for same destination — runaround needed (not yet supported in abstract path).");
+                return new DeliveryPlan(new List<DeliveryStep>(), warnings);
+            }
+
+            if (stepsA.Count > 0 || stepsB.Count > 0)
+            {
+                var bestSteps = PickCloserDeliveryAbstract(stepsA, stepsB);
+                return new DeliveryPlan(bestSteps, warnings,
+                    reason: $"Delivering {bestSteps[0].CarNames} to {bestSteps[0].DestinationName}");
+            }
+
+            // No direct deliveries available.
+            // In the full planner this falls through to runaround/reposition/split.
+            // For now, check if there are any deliverable cars at all and report accordingly.
+            bool hasDeliverableCars = false;
+            foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
+            {
+                if (!_iTrainService.HasWaybill(car)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
+                float space = _iTrainService.GetAvailableSpace(car);
+                if (space >= 2f)
+                {
+                    hasDeliverableCars = true;
+                    break;
+                }
+            }
+
+            if (hasDeliverableCars)
+            {
+                warnings.Add("No direct delivery possible — runaround/reposition needed (not yet supported in abstract path).");
+            }
+            else
+            {
+                warnings.Add("No deliverable cars found.");
+            }
+
+            return new DeliveryPlan(new List<DeliveryStep>(), warnings);
+        }
+
+        /// <summary>
+        /// Check if both sides have cars going to the same destination using ITrainService.
+        /// </summary>
+        private static bool SidesShareDestinationAbstract(CarGroup sideA, CarGroup sideB,
+            ITrainService trainService, IReadOnlyCollection<string>? skippedCarIds)
+        {
+            if (sideA.IsEmpty || sideB.IsEmpty) return false;
+
+            var destsA = new HashSet<string>();
+            foreach (var car in sideA.Cars)
+            {
+                if (!trainService.HasWaybill(car)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
+                var name = trainService.GetDestinationName(car);
+                if (name != null) destsA.Add(name);
+            }
+
+            foreach (var car in sideB.Cars)
+            {
+                if (!trainService.HasWaybill(car)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
+                var name = trainService.GetDestinationName(car);
+                if (name != null && destsA.Contains(name))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Pick the closer delivery between two side options using IGraphAdapter for distance.
+        /// </summary>
+        private List<DeliveryStep> PickCloserDeliveryAbstract(
+            List<DeliveryStep> stepsA, List<DeliveryStep> stepsB)
+        {
+            if (stepsA.Count == 0) return stepsB;
+            if (stepsB.Count == 0) return stepsA;
+
+            if (stepsA.Count != stepsB.Count)
+                return stepsA.Count > stepsB.Count ? stepsA : stepsB;
+
+            // Use IGraphAdapter to find route distances from the loco to each destination.
+            var locoFront = _iTrainService!.GetLocoFront();
+            var locoRear = _iTrainService.GetLocoRear();
+            var coupledIds = _iTrainService.GetCoupled().Select(c => c.id).ToList();
+
+            var destA = stepsA[0].DestinationLocation;
+            var destB = stepsB[0].DestinationLocation;
+
+            var routeA = _iGraph!.FindBestRoute(locoFront.Undirected, destA, coupledIds);
+            var routeB = _iGraph.FindBestRoute(locoFront.Undirected, destB, coupledIds);
+
+            float distA = routeA?.Distance ?? float.MaxValue;
+            float distB = routeB?.Distance ?? float.MaxValue;
+
+            return distA <= distB ? stepsA : stepsB;
         }
     }
 }
