@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using UnityEngine.UI;
 using UI;
 using UI.Builder;
 using UI.Common;
@@ -36,6 +37,7 @@ namespace Autopilot.UI
         private string _lastStatusMessage;
         private string _lastErrorMessage;
         private Coroutine _ticker;
+        private float _scrollPosition;
         private TrainService _trainService;
         private TrainService TrainSvc => _trainService ??= new TrainService();
 
@@ -141,8 +143,25 @@ namespace Autopilot.UI
 
         private void RebuildPanel()
         {
-            if (_isOpen && _panel != null)
-                _rebuildMethod?.Invoke(_panel, null);
+            if (!_isOpen || _panel == null) return;
+
+            // Save scroll position before rebuild
+            var scrollRect = _window.contentRectTransform.GetComponentInChildren<ScrollRect>();
+            if (scrollRect != null)
+                _scrollPosition = scrollRect.verticalNormalizedPosition;
+
+            _rebuildMethod?.Invoke(_panel, null);
+
+            // Restore scroll position after layout reflows (next frame)
+            AutopilotController.Instance?.StartCoroutine(RestoreScrollPosition());
+        }
+
+        private IEnumerator RestoreScrollPosition()
+        {
+            yield return null;
+            var scrollRect = _window?.contentRectTransform?.GetComponentInChildren<ScrollRect>();
+            if (scrollRect != null)
+                scrollRect.verticalNormalizedPosition = _scrollPosition;
         }
 
         private void OnStateChanged()
@@ -398,6 +417,7 @@ namespace Autopilot.UI
 
             _window.Title = "Autopilot";
             _window.SetContentSize(new Vector2Int(500, 500));
+            _window.SetResizable(new Vector2(500, 500), new Vector2(650, Screen.height));
             _window.SetPosition(Window.Position.LowerRight);
 
             // builderAssets may be private — try field access, fall back to reflection
@@ -433,15 +453,17 @@ namespace Autopilot.UI
             _window.ShowWindow();
         }
 
-        private void BuildContent(UIPanelBuilder builder)
+        private void BuildContent(UIPanelBuilder outerBuilder)
         {
             var controller = AutopilotController.Instance;
             if (controller == null)
             {
-                builder.AddLabel("Autopilot controller not initialized.");
+                outerBuilder.AddLabel("Autopilot controller not initialized.");
                 return;
             }
 
+            outerBuilder.VScrollView(builder =>
+            {
             builder.Spacing = 1f;
 
             var loco = TrainController.Shared?.SelectedLocomotive;
@@ -735,6 +757,7 @@ namespace Autopilot.UI
                     }
                 }
             }
+            });
         }
     }
 }
