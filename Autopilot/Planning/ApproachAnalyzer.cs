@@ -57,16 +57,21 @@ namespace Autopilot.Planning
                 CarBlockingRoute = 500
             };
 
-            var tailOutward = group.TailOutwardEnd!.Value;
-            var tailInward = group.TailInwardEnd!.Value;
-            var destLoc = destLocation.ToLocation();
+            var tailOutwardGp = group.TailOutwardEnd!.Value;
+            var tailInwardGp = group.TailInwardEnd!.Value;
 
-            // Route from tail to destination. RouteSearch exits the starting
-            // segment in one direction only (the facing direction of the Location).
-            // tailOutward and tailOutward.Flipped face OPPOSITE directions on
-            // the same segment, so we try both and pick the shorter route.
+            // Convert GraphPosition back to DirectedPosition for game route search
+            var adapter = new GameGraphAdapter();
+            RegisterSegmentById(adapter, tailOutwardGp.SegmentId);
+            RegisterSegmentById(adapter, tailInwardGp.SegmentId);
+            RegisterSegmentById(adapter, destLocation.SegmentId);
+
+            var tailOutward = adapter.ToDirectedPosition(tailOutwardGp);
+            var tailInward = adapter.ToDirectedPosition(tailInwardGp);
+            var destLoc = destLocation.ToLocation(adapter);
+
             int reversals = 0;
-            bool tailFacesDest = true; // default if no route or single segment
+            bool tailFacesDest = true;
 
             if (tailOutward.Segment != null)
             {
@@ -74,7 +79,6 @@ namespace Autopilot.Planning
                 {
                     var tailOutwardLoc = tailOutward.ToLocation();
 
-                    // Try both directions from the tail's position
                     var outwardSteps = new List<RouteSearch.Step>();
                     bool outwardFound = RouteSearch.FindRoute(graph, tailOutwardLoc, destLoc, heuristic,
                         outwardSteps, out RouteSearch.Metrics outwardMetrics,
@@ -88,7 +92,6 @@ namespace Autopilot.Planning
                         checkForCars: false, trainLength: 0f,
                         maxIterations: 5000, enableLogging: false);
 
-                    // Pick the shorter route — it represents the actual approach
                     bool useOutward = outwardFound && (!flippedFound || outwardMetrics.Distance <= flippedMetrics.Distance);
                     var tailRouteSteps = useOutward ? outwardSteps : flippedSteps;
                     bool found = useOutward ? outwardFound : flippedFound;
@@ -99,10 +102,6 @@ namespace Autopilot.Planning
 
                         _logger.LogApproachDetails("CheckApproach", group, loco, tailOutward, route);
 
-                        // #2: Which end of the tail car is closer to the first switch
-                        // on the route? If the free (outward) end → train goes forward
-                        // → need even reversals. If the coupled (inward) end → train
-                        // goes backward → need odd reversals.
                         TrackNode firstRouteSwitch = null;
                         for (int j = 0; j < route.Count - 1; j++)
                         {
@@ -114,7 +113,6 @@ namespace Autopilot.Planning
                             }
                         }
 
-                        // Check both methods for tailFacesDest
                         bool routeGoesOutward = Services.TrackWalker.RouteGoesOutward(
                             tailOutward, tailInward, route);
 
@@ -130,10 +128,6 @@ namespace Autopilot.Planning
                             graph.TryFindDistance(inwardLoc, switchLoc, out float distInward, out _);
 
                             bool distanceCheck = distOutward < distInward;
-
-                            // Use RouteGoesOutward as the primary check.
-                            // It directly checks which end of the tail's segment
-                            // the route exits from — no ambiguity with distances.
                             tailFacesDest = routeGoesOutward;
 
                             _logger.LogDebug("CheckApproach", $"firstSwitch={firstRouteSwitch.id}, " +
@@ -158,14 +152,27 @@ namespace Autopilot.Planning
                 }
             }
 
-            // Combine: tailFacesDest XOR oddReversals
             bool oddReversals = (reversals % 2 == 1);
             bool tailLeads = tailFacesDest != oddReversals;
 
             _logger.LogDebug("CheckApproach", $"tailFacesDest={tailFacesDest}, " +
-                $"reversals={reversals}, tailLeads={tailLeads} (dest={destLocation.Segment?.id})");
+                $"reversals={reversals}, tailLeads={tailLeads} (dest={destLocation.SegmentId})");
 
             return tailLeads;
+        }
+
+        private static void RegisterSegmentById(GameGraphAdapter adapter, string segmentId)
+        {
+            if (segmentId == null) return;
+            var graph = Track.Graph.Shared;
+            foreach (var seg in graph.Segments)
+            {
+                if (seg.id == segmentId)
+                {
+                    adapter.RegisterSegment(seg);
+                    return;
+                }
+            }
         }
 
         /// <summary>
@@ -176,7 +183,7 @@ namespace Autopilot.Planning
         /// </summary>
         public static bool IsConsistWithinSpan(BaseLocomotive loco, CarGroup group, SpanBoundary destLocation)
         {
-            if (destLocation.Segment == null) return false;
+            if (destLocation.SegmentId == null) return false;
 
             // Collect all segments the consist occupies
             var consistSegIds = new HashSet<string>();
@@ -189,15 +196,21 @@ namespace Autopilot.Planning
             }
 
             // Direct match
-            if (consistSegIds.Contains(destLocation.Segment.id)) return true;
+            if (consistSegIds.Contains(destLocation.SegmentId)) return true;
 
-            // Walk outward from the destination segment in both directions
-            // (up to MaxSpanWalkSegments segments each way) looking for a consist segment.
-            // This finds the train within a multi-segment span.
+            // Walk outward from the destination segment in both directions.
+            // Resolve the segment ID to a game TrackSegment for walking.
             var graph = Graph.Shared;
+            TrackSegment? destSeg = null;
+            foreach (var s in graph.Segments)
+            {
+                if (s.id == destLocation.SegmentId) { destSeg = s; break; }
+            }
+            if (destSeg == null) return false;
+
             foreach (var startEnd in new[] { TrackSegment.End.A, TrackSegment.End.B })
             {
-                var seg = destLocation.Segment;
+                var seg = destSeg;
                 var walkEnd = startEnd;
                 for (int i = 0; i < MaxSpanWalkSegments; i++)
                 {

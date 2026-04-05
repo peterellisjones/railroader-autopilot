@@ -40,7 +40,7 @@ namespace Autopilot.Planning
             if (group.TailInwardEnd.HasValue)
             {
                 var tailInward = group.TailInwardEnd.Value;
-                LogDebug(prefix, $"tailInward seg={tailInward.Segment?.id}, " +
+                LogDebug(prefix, $"tailInward seg={tailInward.SegmentId}, " +
                     $"facing={tailInward.Facing}, distFromA={tailInward.DistanceFromA:F1}");
             }
             LogDebug(prefix, $"tailCar={group.TailCar?.DisplayName}, " +

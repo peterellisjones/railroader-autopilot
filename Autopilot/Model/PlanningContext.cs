@@ -10,14 +10,14 @@ namespace Autopilot.Model
     public record PlanningContext(
         HashSet<string> VisitedSwitches,
         HashSet<string> VisitedLoopKeys,
-        HashSet<Car> SkippedCars,
+        HashSet<string> SkippedCarIds,
         SplitInfo? PendingSplit
     )
     {
         public static PlanningContext Empty => new(
             new HashSet<string>(),
             new HashSet<string>(),
-            new HashSet<Car>(),
+            new HashSet<string>(),
             null
         );
 
@@ -27,11 +27,11 @@ namespace Autopilot.Model
         public PlanningContext WithVisitedLoop(string key) =>
             this with { VisitedLoopKeys = new HashSet<string>(VisitedLoopKeys) { key } };
 
-        public PlanningContext WithSkippedCar(Car car) =>
-            this with { SkippedCars = new HashSet<Car>(SkippedCars) { car } };
+        public PlanningContext WithSkippedCar(ICar car) =>
+            this with { SkippedCarIds = new HashSet<string>(SkippedCarIds) { car.id } };
 
-        public PlanningContext WithSkippedCars(IEnumerable<Car> cars) =>
-            this with { SkippedCars = new HashSet<Car>(SkippedCars.Concat(cars)) };
+        public PlanningContext WithSkippedCars(IEnumerable<ICar> cars) =>
+            this with { SkippedCarIds = new HashSet<string>(SkippedCarIds.Concat(cars.Select(c => c.id))) };
 
         public PlanningContext WithPendingSplit(SplitInfo? split) =>
             this with { PendingSplit = split };
@@ -39,13 +39,15 @@ namespace Autopilot.Model
         public PlanningContext WithClearedSwitches() =>
             this with { VisitedSwitches = new HashSet<string>() };
 
+        public bool IsCarSkipped(ICar car) => SkippedCarIds.Contains(car.id);
+
         public string Serialize()
         {
             var obj = new JObject
             {
                 ["visitedSwitches"] = new JArray(VisitedSwitches.ToArray()),
                 ["visitedLoopKeys"] = new JArray(VisitedLoopKeys.ToArray()),
-                ["skippedCarIds"] = new JArray(SkippedCars.Select(c => c.id).ToArray())
+                ["skippedCarIds"] = new JArray(SkippedCarIds.ToArray())
             };
             return obj.ToString(Formatting.None);
         }
@@ -62,16 +64,11 @@ namespace Autopilot.Model
                 (obj["visitedLoopKeys"] as JArray)?.Select(t => t.Value<string>())
                 ?? Enumerable.Empty<string>());
 
-            var skippedCars = new HashSet<Car>();
-            var skippedIds = (obj["skippedCarIds"] as JArray)?.Select(t => t.Value<string>())
-                ?? Enumerable.Empty<string>();
-            foreach (var id in skippedIds)
-            {
-                if (TrainController.Shared != null && TrainController.Shared.TryGetCarForId(id, out Car car))
-                    skippedCars.Add(car);
-            }
+            var skippedCarIds = new HashSet<string>(
+                (obj["skippedCarIds"] as JArray)?.Select(t => t.Value<string>())
+                ?? Enumerable.Empty<string>());
 
-            return new PlanningContext(visitedSwitches, visitedLoopKeys, skippedCars, null);
+            return new PlanningContext(visitedSwitches, visitedLoopKeys, skippedCarIds, null);
         }
     }
 }

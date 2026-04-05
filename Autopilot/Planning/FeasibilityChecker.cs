@@ -62,10 +62,27 @@ namespace Autopilot.Planning
             if (!ApproachAnalyzer.CheckApproachDirection(loco, group, destLocation))
                 return false;
 
-            if (!CanRouteTo(loco, destLocation.ToDirectedPosition()))
+            // Convert SpanBoundary to DirectedPosition for route checking
+            var adapter = new GameGraphAdapter();
+            RegisterSegmentById(adapter, destLocation.SegmentId);
+            if (!CanRouteTo(loco, destLocation.ToDirectedPosition(adapter)))
                 return false;
 
             return true;
+        }
+
+        private static void RegisterSegmentById(GameGraphAdapter adapter, string segmentId)
+        {
+            if (segmentId == null) return;
+            var graph = Track.Graph.Shared;
+            foreach (var seg in graph.Segments)
+            {
+                if (seg.id == segmentId)
+                {
+                    adapter.RegisterSegment(seg);
+                    return;
+                }
+            }
         }
 
         public LoopStatus GetLoopStatus(BaseLocomotive loco)

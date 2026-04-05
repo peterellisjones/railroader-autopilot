@@ -19,7 +19,7 @@ namespace Autopilot.Planning
         }
 
         public List<DeliveryStep> GetDeliverableSteps(BaseLocomotive loco, CarGroup group,
-            FeasibilityChecker checker, IEnumerable<Car>? skippedCars = null, int maxSteps = int.MaxValue)
+            FeasibilityChecker checker, IEnumerable<string>? skippedCarIds = null, int maxSteps = int.MaxValue)
         {
             var steps = new List<DeliveryStep>();
             if (group.IsEmpty) return steps;
@@ -30,9 +30,7 @@ namespace Autopilot.Planning
                 var car = group.Cars[i];
 
                 // A skipped car (siding overflow) blocks access to cars behind it.
-                // Can't uncouple past it — must split or runaround first.
-                var gameCarCheck = (car as CarAdapter)?.Car;
-                if (skippedCars != null && gameCarCheck != null && skippedCars.Contains(gameCarCheck))
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id))
                     break;
 
                 var waybill = car.Waybill;
@@ -61,15 +59,6 @@ namespace Autopilot.Planning
                     continue;
                 }
 
-                // Pick the first candidate that passes route feasibility
-                // AND has space for at least one car.
-                //
-                // For multi-segment spans, the far endpoint may show a
-                // different reversal count than the near endpoint. But the
-                // train enters the span from one side — if the approach
-                // fails for the nearest candidate on a span, skip other
-                // candidates on the SAME span. Different spans (independent
-                // sidings) are checked independently.
                 DirectedPosition destLocation = default;
                 Car? coupleTarget = null;
                 float availableSpace = 0f;
@@ -99,9 +88,9 @@ namespace Autopilot.Planning
                 {
                     if (candidate.loc.Segment == null) continue;
                     if (candidate.availableSpace < 2f)
-                        continue; // not enough space (need at least 2m overlap)
+                        continue;
                     if (failedSpans.Contains(candidate.spanIndex))
-                        continue; // approach already failed for this span
+                        continue;
 
                     if (checker.CanDeliver(loco, group, candidate.approachTarget))
                     {
@@ -119,37 +108,32 @@ namespace Autopilot.Planning
                 }
 
                 if (!foundDest)
-                    break; // no span is deliverable or has space — stop
+                    break;
 
                 // Group consecutive cars going to the same physical track.
-                // Each car uses its full length of space, but the last car
-                // only needs 2m overlap with the span to count as delivered.
-                const float MinOverlap = 2f;
-                var firstGameCar = (car as CarAdapter)?.Car;
-                var carGroup = new List<Car> { firstGameCar };
-                float usedSpace = 0f; // first car only needs MinOverlap
+                var carGroup = new List<ICar> { car };
+                float usedSpace = 0f;
                 while (i + carGroup.Count < group.Cars.Count)
                 {
                     var nextCar = group.Cars[i + carGroup.Count];
                     if (nextCar.Waybill == null)
                         break;
                     var nextDest = nextCar.Waybill.Value.Destination;
-                    // Check same destination by identity, not by which segment
-                    // GetDestinationLocation returns — that returns the global
-                    // best candidate which may be on a different span/segment
-                    // than the one selected for this delivery.
                     if (nextDest.Identifier != destination.Identifier)
                         break;
-                    // Previous car now needs its full length plus coupling gap
-                    // (it's no longer the last). Next car only needs MinOverlap.
                     var prevCar = carGroup[carGroup.Count - 1];
-                    usedSpace += (prevCar?.carLength ?? car.CarLength) + AutopilotConstants.ConsistGapPerCar;
-                    if (usedSpace + MinOverlap > availableSpace)
+                    usedSpace += prevCar.CarLength + AutopilotConstants.ConsistGapPerCar;
+                    if (usedSpace + 2f > availableSpace)
                         break;
-                    carGroup.Add((nextCar as CarAdapter)?.Car);
+                    carGroup.Add(nextCar);
                 }
 
-                steps.Add(new DeliveryStep(carGroup, destination, destLocation, coupleTarget, selectedSpanIndex));
+                // Convert game types to abstract types for the DeliveryStep
+                var destGp = new GraphPosition(destLocation.Segment?.id, destLocation.DistanceFromA, destLocation.Facing);
+                ICar? coupleTargetICar = coupleTarget != null ? new CarAdapter(coupleTarget) : null;
+
+                steps.Add(new DeliveryStep(carGroup, destination.Identifier, destination.DisplayName,
+                    destGp, coupleTargetICar, selectedSpanIndex));
                 if (steps.Count >= maxSteps)
                     return steps;
                 i += carGroup.Count;

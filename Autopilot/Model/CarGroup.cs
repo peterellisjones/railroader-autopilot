@@ -3,6 +3,7 @@ using System.Linq;
 using Model;
 using Track;
 using Autopilot.Services;
+using Autopilot.TrackGraph;
 
 namespace Autopilot.Model
 {
@@ -18,8 +19,8 @@ namespace Autopilot.Model
         public int Count => _cars.Count;
         public bool IsEmpty => _cars.Count == 0;
 
-        public DirectedPosition? TailOutwardEnd { get; }
-        public DirectedPosition? TailInwardEnd { get; }
+        public GraphPosition? TailOutwardEnd { get; }
+        public GraphPosition? TailInwardEnd { get; }
         public Direction? ConsistDirection { get; }
 
         public CarGroup(List<ICar> carsFromTailToLoco)
@@ -28,8 +29,8 @@ namespace Autopilot.Model
             if (_cars.Count > 0)
             {
                 ResolveTailEnds(_cars[0], out var outward, out var inward, out var dir);
-                TailOutwardEnd = outward;
-                TailInwardEnd = inward;
+                TailOutwardEnd = ToGraphPosition(outward);
+                TailInwardEnd = ToGraphPosition(inward);
                 ConsistDirection = dir;
             }
         }
@@ -37,7 +38,7 @@ namespace Autopilot.Model
         /// <summary>
         /// Private constructor for pre-resolved groups (used by Reversed).
         /// </summary>
-        private CarGroup(List<ICar> cars, DirectedPosition? tailOutward, DirectedPosition? tailInward, Direction? dir)
+        private CarGroup(List<ICar> cars, GraphPosition? tailOutward, GraphPosition? tailInward, Direction? dir)
         {
             _cars = cars;
             TailOutwardEnd = tailOutward;
@@ -101,8 +102,8 @@ namespace Autopilot.Model
                 var inwardPos = outwardLogical == Car.LogicalEnd.A ? newTail.EndB : newTail.EndA;
 
                 var dir = ComputeDirection(outwardPos, inwardPos);
-                var resolvedOutward = new DirectedPosition(outwardPos.Segment, outwardPos.DistanceFromA, dir);
-                var resolvedInward = new DirectedPosition(inwardPos.Segment, inwardPos.DistanceFromA, dir.Opposite());
+                var resolvedOutward = new GraphPosition(outwardPos.Segment?.id, outwardPos.DistanceFromA, dir);
+                var resolvedInward = new GraphPosition(inwardPos.Segment?.id, inwardPos.DistanceFromA, dir.Opposite());
                 return new CarGroup(reversed, resolvedOutward, resolvedInward, dir);
             }
             else
@@ -114,11 +115,11 @@ namespace Autopilot.Model
                 if (TailOutwardEnd.HasValue && TailInwardEnd.HasValue)
                 {
                     var swappedDir = ConsistDirection!.Value.Opposite();
-                    var swappedOutward = new DirectedPosition(TailInwardEnd.Value.Segment, TailInwardEnd.Value.DistanceFromA, swappedDir);
-                    var swappedInward = new DirectedPosition(TailOutwardEnd.Value.Segment, TailOutwardEnd.Value.DistanceFromA, swappedDir.Opposite());
+                    var swappedOutward = new GraphPosition(TailInwardEnd.Value.SegmentId, TailInwardEnd.Value.DistanceFromA, swappedDir);
+                    var swappedInward = new GraphPosition(TailOutwardEnd.Value.SegmentId, TailOutwardEnd.Value.DistanceFromA, swappedDir.Opposite());
                     return new CarGroup(reversed, swappedOutward, swappedInward, swappedDir);
                 }
-                return new CarGroup(reversed, inward, outward, dir.Opposite());
+                return new CarGroup(reversed, ToGraphPosition(inward), ToGraphPosition(outward), dir.Opposite());
             }
         }
 
@@ -174,6 +175,12 @@ namespace Autopilot.Model
             // Last resort — default
             return outwardPos.DistanceFromA > inwardPos.DistanceFromA
                 ? Direction.TowardEndB : Direction.TowardEndA;
+        }
+
+        /// <summary>Convert a DirectedPosition to a GraphPosition (null-safe).</summary>
+        private static GraphPosition? ToGraphPosition(DirectedPosition dp)
+        {
+            return new GraphPosition(dp.Segment?.id, dp.DistanceFromA, dp.Facing);
         }
     }
 }

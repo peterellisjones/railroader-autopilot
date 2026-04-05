@@ -1,7 +1,6 @@
 // Autopilot/Model/PickupTarget.cs
 using System.Collections.Generic;
 using System.Linq;
-using Model;
 
 namespace Autopilot.Model
 {
@@ -14,16 +13,16 @@ namespace Autopilot.Model
     public class PickupTarget
     {
         /// <summary>The outermost car — the one the loco couples to.</summary>
-        public Car CoupleTarget { get; }
+        public ICar CoupleTarget { get; }
 
         /// <summary>Location for SetWaypointWithCouple.</summary>
-        public CoupleWaypoint CoupleLocation { get; }
+        public GraphCoupleWaypoint CoupleLocation { get; }
 
         /// <summary>Consecutive target cars from the approach end.</summary>
-        public List<Car> TargetCars { get; }
+        public IReadOnlyList<ICar> TargetCars { get; }
 
-        public PickupTarget(Car coupleTarget, CoupleWaypoint coupleLocation,
-            List<Car> targetCars)
+        public PickupTarget(ICar coupleTarget, GraphCoupleWaypoint coupleLocation,
+            IReadOnlyList<ICar> targetCars)
         {
             CoupleTarget = coupleTarget;
             CoupleLocation = coupleLocation;

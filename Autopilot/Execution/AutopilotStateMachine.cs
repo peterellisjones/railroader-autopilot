@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Model;
 using Autopilot.Model;
 using Autopilot.Planning;
@@ -101,15 +102,6 @@ namespace Autopilot.Execution
             if (Phase is not Failed)
                 return;
 
-            // Preserve mode, context, destination, pickup count from the failed phase.
-            // We need to recover these from the Failed phase — but Failed only stores
-            // ErrorMessage and LastPlan. The mode/context/destination are lost.
-            // We need to re-enter planning with the last known context.
-            // Since Failed doesn't carry context, we restart with empty context.
-            // This matches the old behavior: Retry() just set state to Planning
-            // with whatever _context was (which was never cleared on error).
-            //
-            // To preserve context across errors, we store it in a field when entering Failed.
             SetPhase(new PlanningPhase(
                 _retryContext ?? PlanningContext.Empty,
                 _retryMode,
@@ -137,9 +129,6 @@ namespace Autopilot.Execution
             if (_loco == null)
                 return;
 
-            // Clear per-plan-cycle caches so execution actions see fresh
-            // coupling state. The caches are still useful within BuildPlan
-            // (which runs inside a single tick).
             _trainService.ClearPlanCaches();
             _refuelPlanner.ClearCache();
 
@@ -174,7 +163,7 @@ namespace Autopilot.Execution
                     if (outcome is ActionReplan r && r.SkippedCars != null)
                     {
                         context = context.WithSkippedCars(r.SkippedCars);
-                        Loader.Mod.Logger.Log($"Autopilot: {r.SkippedCars.Count} car(s) skipped (siding full), total skipped: {context.SkippedCars.Count}");
+                        Loader.Mod.Logger.Log($"Autopilot: {r.SkippedCars.Count} car(s) skipped (siding full), total skipped: {context.SkippedCarIds.Count}");
                     }
 
                     if (exec.Mode == AutopilotMode.Pickup && exec.CurrentAction is PickupAction pa)
@@ -208,7 +197,6 @@ namespace Autopilot.Execution
 
         /// <summary>
         /// Check if the loco needs refueling and create a RefuelAction if so.
-        /// Returns the action if refueling is needed, null otherwise.
         /// </summary>
         private RefuelAction? TryCreateRefuelAction(BaseLocomotive loco, int thresholdPercent)
         {
@@ -256,13 +244,45 @@ namespace Autopilot.Execution
             return new RefuelAction(facility, loco, _trainService);
         }
 
+        /// <summary>Helper to convert GraphPosition to DirectedPosition for the Executing phase.</summary>
+        private DirectedPosition? ToDirectedPosition(GraphPosition? gp)
+        {
+            if (!gp.HasValue) return null;
+            var adapter = new Autopilot.TrackGraph.GameGraphAdapter();
+            RegisterSegmentId(adapter, gp.Value.SegmentId);
+            return adapter.ToDirectedPosition(gp.Value);
+        }
+
+        /// <summary>Helper to convert GraphCoupleWaypoint to DirectedPosition for the Executing phase.</summary>
+        private DirectedPosition? CoupleWaypointToDirectedPosition(GraphCoupleWaypoint cwp)
+        {
+            var adapter = new Autopilot.TrackGraph.GameGraphAdapter();
+            RegisterSegmentId(adapter, cwp.SegmentId);
+            var dp = adapter.ToDirectedPosition(cwp.ToGraphPosition());
+            return dp;
+        }
+
+        private static void RegisterSegmentId(Autopilot.TrackGraph.GameGraphAdapter adapter, string segmentId)
+        {
+            if (segmentId == null) return;
+            var graph = Track.Graph.Shared;
+            foreach (var seg in graph.Segments)
+            {
+                if (seg.id == segmentId)
+                {
+                    adapter.RegisterSegment(seg);
+                    break;
+                }
+            }
+        }
+
         private void TickPlanning(PlanningPhase p)
         {
             DeliveryPlan plan;
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                plan = _planner.BuildPlan(_loco, p.Context.VisitedSwitches, p.Context.VisitedLoopKeys, p.Context.SkippedCars);
+                plan = _planner.BuildPlan(_loco, p.Context.VisitedSwitches, p.Context.VisitedLoopKeys, p.Context.SkippedCarIds);
                 sw.Stop();
                 if (sw.ElapsedMilliseconds > 10)
                     Loader.Mod.Logger.Log($"Autopilot: BuildPlan took {sw.ElapsedMilliseconds}ms");
@@ -293,19 +313,19 @@ namespace Autopilot.Execution
                     var split = p.Context.PendingSplit;
                     var newContext = p.Context.WithPendingSplit(null);
                     var action = new RecoupleAction(split, _loco, _trainService);
-                    SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
+                    SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, CoupleWaypointToDirectedPosition(split.CoupleLocation)));
                     return;
                 }
 
-                if (plan.Warnings.Count == 0 && p.Context.SkippedCars.Count == 0)
+                if (plan.Warnings.Count == 0 && p.Context.SkippedCarIds.Count == 0)
                 {
                     if (_trainService.GetParkAfterDelivery(_loco) && _trainService.GoToParkingSpace(_loco))
                         SetPhase(new Completed("All deliveries complete! Parking..."));
                     else
                         SetPhase(new Completed("All deliveries complete!"));
                 }
-                else if (p.Context.SkippedCars.Count > 0)
-                    EnterFailed($"{p.Context.SkippedCars.Count} car(s) skipped — siding(s) full. Stop and restart autopilot to retry.", p);
+                else if (p.Context.SkippedCarIds.Count > 0)
+                    EnterFailed($"{p.Context.SkippedCarIds.Count} car(s) skipped — siding(s) full. Stop and restart autopilot to retry.", p);
                 else
                     EnterFailed("No deliverable cars found. " + string.Join(" ", plan.Warnings), p);
                 return;
@@ -326,7 +346,7 @@ namespace Autopilot.Execution
                     $" (couple={step.CoupleTarget?.DisplayName ?? "none"})");
                 var newContext = p.Context.WithClearedSwitches();
                 var action = new DeliveryAction(step, _loco, _trainService);
-                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, step.DestinationLocation));
+                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, ToDirectedPosition(step.DestinationLocation)));
                 return;
             }
 
@@ -338,7 +358,7 @@ namespace Autopilot.Execution
                 Loader.Mod.Logger.Log($"Autopilot: action=Recouple {split.DroppedCars.Count} dropped car(s)");
                 var newContext = p.Context.WithPendingSplit(null);
                 var action = new RecoupleAction(split, _loco, _trainService);
-                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, split.CoupleLocation.ToDirectedPosition()));
+                SetPhase(new Executing(plan, action, newContext, p.Mode, p.PickupFilter, p.PickupCount, CoupleWaypointToDirectedPosition(split.CoupleLocation)));
                 return;
             }
 
@@ -347,7 +367,7 @@ namespace Autopilot.Execution
                 Loader.Mod.Logger.Log($"Autopilot: action=Runaround, split={plan.Runaround.SplitCar.DisplayName}, " +
                     $"couple={plan.Runaround.CoupleTarget.DisplayName}, reason={plan.Reason}");
                 var action = new RunaroundExecutionAction(plan.Runaround, _loco, _trainService);
-                SetPhase(new Executing(plan, action, p.Context, p.Mode, p.PickupFilter, p.PickupCount, plan.Runaround.CoupleLocation.ToDirectedPosition()));
+                SetPhase(new Executing(plan, action, p.Context, p.Mode, p.PickupFilter, p.PickupCount, CoupleWaypointToDirectedPosition(plan.Runaround.CoupleLocation)));
                 return;
             }
 
@@ -361,15 +381,12 @@ namespace Autopilot.Execution
                 return;
             }
 
-            // Reposition to a loop. Don't mark the loop as visited yet —
-            // the reposition may not fully place the train on the loop
-            // (e.g. long train tail extends past the stem). Let the next
-            // planning cycle re-evaluate the same loop. It will either
-            // succeed at the runaround or reposition again.
+            // Reposition to a loop.
             Loader.Mod.Logger.Log($"Autopilot: action=Reposition, reason={plan.Reason}");
+            var repositionDp = ToDirectedPosition(plan.RepositionLocation!.Value)!.Value;
             var repositionAction = new RepositionAction(
-                plan.RepositionLocation!.Value, _loco, _trainService, plan.Reason);
-            SetPhase(new Executing(plan, repositionAction, p.Context, p.Mode, p.PickupFilter, p.PickupCount, plan.RepositionLocation.Value));
+                repositionDp, _loco, _trainService, plan.Reason);
+            SetPhase(new Executing(plan, repositionAction, p.Context, p.Mode, p.PickupFilter, p.PickupCount, repositionDp));
         }
 
         private void TickPickupPlanning(PlanningPhase p)
@@ -385,7 +402,7 @@ namespace Autopilot.Execution
             PickupTarget? target;
             try
             {
-                target = _pickupPlanner!.FindNextPickup(_loco, p.PickupFilter!, p.Context.SkippedCars);
+                target = _pickupPlanner!.FindNextPickup(_loco, p.PickupFilter!, p.Context.SkippedCarIds);
             }
             catch (Exception ex)
             {
@@ -416,7 +433,7 @@ namespace Autopilot.Execution
             }
 
             var action = new PickupAction(target, _loco, _trainService);
-            SetPhase(new Executing(null, action, p.Context, p.Mode, p.PickupFilter, p.PickupCount, target.CoupleLocation.ToDirectedPosition()));
+            SetPhase(new Executing(null, action, p.Context, p.Mode, p.PickupFilter, p.PickupCount, CoupleWaypointToDirectedPosition(target.CoupleLocation)));
         }
 
         private void EnterFailed(string message, AutopilotPhase fromPhase)

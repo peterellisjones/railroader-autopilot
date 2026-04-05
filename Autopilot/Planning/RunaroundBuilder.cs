@@ -19,38 +19,34 @@ namespace Autopilot.Planning
         }
 
         public RunaroundAction? BuildRunaroundAction(BaseLocomotive loco, CarGroup group, Graph graph,
-            TrainService trainService, FeasibilityChecker checker, IEnumerable<Car>? skippedCars = null)
+            TrainService trainService, FeasibilityChecker checker, IEnumerable<string>? skippedCarIds = null)
         {
             if (group.IsEmpty) return null;
 
-            // Find the optimal split point. After runaround, the inner cars become
-            // the new tail. We want those inner cars to be deliverable. Find how
-            // many cars from the inner end are deliverable (via Reversed),
-            // then split to keep those with the loco.
             var flipped = group.Reversed();
-            var directSteps = _deliverabilityAnalyzer.GetDeliverableSteps(loco, group, checker, skippedCars);
-            var flippedSteps = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flipped, checker, skippedCars);
+            var directSteps = _deliverabilityAnalyzer.GetDeliverableSteps(loco, group, checker, skippedCarIds);
+            var flippedSteps = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flipped, checker, skippedCarIds);
 
             // Mark which cars are directly deliverable (from the tail end)
-            var directCars = new HashSet<Car>();
+            var directCarIds = new HashSet<string>();
             foreach (var step in directSteps)
-                foreach (var car in step.Cars) directCars.Add(car);
+                foreach (var car in step.Cars) directCarIds.Add(car.id);
 
             // Mark which cars are deliverable after flip (from the inner end)
-            var flippedCars = new HashSet<Car>();
+            var flippedCarIds = new HashSet<string>();
             foreach (var step in flippedSteps)
-                foreach (var car in step.Cars) flippedCars.Add(car);
+                foreach (var car in step.Cars) flippedCarIds.Add(car.id);
 
             int carsToKeep = RunaroundSplitCalculator.CalculateCarsToKeep(
                 group.Cars.Count,
                 i => group.Cars[i].IsLocoOrTender,
-                i => { var gc = (group.Cars[i] as CarAdapter)?.Car; return gc != null && directCars.Contains(gc); },
-                i => { var gc = (group.Cars[i] as CarAdapter)?.Car; return gc != null && flippedCars.Contains(gc); });
+                i => directCarIds.Contains(group.Cars[i].id),
+                i => flippedCarIds.Contains(group.Cars[i].id));
 
             // group.Cars is ordered tail-to-loco. Cars to keep are at the inner end
             int splitIdx = group.Cars.Count - 1;
 
-            // Skip locos/tenders — these always stay with the loco
+            // Skip locos/tenders
             int tendersSkipped = 0;
             while (splitIdx > 0 && group.Cars[splitIdx].IsLocoOrTender)
             {
@@ -58,8 +54,6 @@ namespace Autopilot.Planning
                 tendersSkipped++;
             }
 
-            // Skip the freight cars to keep (carsToKeep includes tenders,
-            // but we already skipped those above)
             int freightToKeep = carsToKeep - tendersSkipped;
             int kept = 0;
             while (splitIdx >= 0 && kept < freightToKeep)
@@ -68,7 +62,6 @@ namespace Autopilot.Planning
                 kept++;
             }
 
-            // If all cars are deliverable after flip, detach ALL from the loco.
             if (splitIdx < 0)
             {
                 splitIdx = group.Cars.Count - 1;
@@ -87,43 +80,39 @@ namespace Autopilot.Planning
             if (splitIdx < group.Cars.Count - 1)
             {
                 var nextInward = group.Cars[splitIdx + 1];
-                // Find which end of splitCar is coupled to nextInward
                 var coupledA = splitCar.CoupledTo(Car.LogicalEnd.A);
                 bool aFacesNext = coupledA != null && coupledA.id == nextInward.id;
                 splitEnd = aFacesNext ? Car.LogicalEnd.A : Car.LogicalEnd.B;
             }
             else if (group.Cars.Count >= 2)
             {
-                // splitCar is LocomotiveEndCar — find end facing loco (away from group)
                 var secondToLast = group.Cars[group.Cars.Count - 2];
                 var coupledA = group.LocomotiveEndCar!.CoupledTo(Car.LogicalEnd.A);
                 bool aFacesSecondToLast = coupledA != null && coupledA.id == secondToLast.id;
-                // The end NOT facing secondToLast faces the loco (outward end)
                 splitEnd = aFacesSecondToLast ? Car.LogicalEnd.B : Car.LogicalEnd.A;
             }
             else
             {
-                // Single car — the coupled end faces the loco
                 splitEnd = splitCar.IsCoupled(Car.LogicalEnd.A)
                     ? Car.LogicalEnd.A : Car.LogicalEnd.B;
             }
 
             // Couple location: the free (uncoupled) end of the couple target.
-            // This is the end facing AWAY from the rest of the car group —
-            // after the runaround, the loco approaches from this side.
-            // Don't use ClosestLogicalEndTo (crow-flies) as the loco may be
-            // near a siding that makes crow-flies unreliable.
             var freeEnd = coupleTarget!.CoupledTo(Car.LogicalEnd.A) != null
                 ? Car.LogicalEnd.B : Car.LogicalEnd.A;
-            var coupleLocation = GetCoupleLocationForEnd(coupleTarget!, freeEnd, graph);
+            var coupleLocationCw = GetCoupleLocationForEnd(coupleTarget!, freeEnd, graph);
+
+            // Convert to GraphCoupleWaypoint
+            var coupleLocation = new GraphCoupleWaypoint(
+                coupleLocationCw.Segment?.id, coupleLocationCw.DistanceFromA, coupleLocationCw.Facing);
 
             // Only include cars being detached (tail up to split point)
-            var disconnectedCars = group.Cars.Take(splitIdx + 1).Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
+            var disconnectedCars = group.Cars.Take(splitIdx + 1).ToList();
 
             return new RunaroundAction(
-                (splitCar as CarAdapter)?.Car!, splitEnd,
-                (coupleTarget as CarAdapter)?.Car!, coupleLocation,
-                disconnectedCars!);
+                splitCar, splitEnd,
+                coupleTarget!, coupleLocation,
+                disconnectedCars);
         }
     }
 }

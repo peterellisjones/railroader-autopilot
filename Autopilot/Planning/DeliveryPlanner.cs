@@ -39,7 +39,7 @@ namespace Autopilot.Planning
         public DeliveryPlan BuildPlan(BaseLocomotive loco,
             IEnumerable<string>? visitedSwitches = null,
             IEnumerable<string>? visitedLoopKeys = null,
-            IEnumerable<Car>? skippedCars = null)
+            IEnumerable<string>? skippedCarIds = null)
         {
             ClearCaches();
             var layout = ConsistLayout.Create(loco, _trainService);
@@ -53,26 +53,17 @@ namespace Autopilot.Planning
                 return new DeliveryPlan(new List<DeliveryStep>(), warnings);
             }
 
-            // Check both sides for direct deliveries. Only need the first step —
-            // we deliver one step at a time and replan after each.
-            var stepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideA, _checker, skippedCars, maxSteps: 1);
-            var stepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideB, _checker, skippedCars, maxSteps: 1);
+            // Check both sides for direct deliveries.
+            var stepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideA, _checker, skippedCarIds, maxSteps: 1);
+            var stepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, layout.SideB, _checker, skippedCarIds, maxSteps: 1);
 
             Log($"Direct deliveries: sideA={stepsA.Count}{(stepsA.Count > 0 ? $" (first: {stepsA[0].DestinationName})" : "")}, sideB={stepsB.Count}{(stepsB.Count > 0 ? $" (first: {stepsB[0].DestinationName})" : "")}");
 
-            // If both sides have waybilled cars for the same destination,
-            // consolidate first (runaround to put all cars on one side).
-            // Otherwise delivering one side traps the loco in the siding
-            // and the other side's cars require backing out and re-entering.
-            // Check raw waybill destinations, not just deliverable steps —
-            // approach direction may differ per side but the destination
-            // conflict still exists.
-            bool needsConsolidation = SidesShareDestination(layout.SideA, layout.SideB, skippedCars);
+            bool needsConsolidation = SidesShareDestination(layout.SideA, layout.SideB, skippedCarIds);
 
             if (needsConsolidation)
             {
                 Log("Both sides have cars for same destination — need split to consolidate");
-                // Fall through past direct delivery AND runaround to the split logic
             }
             else if (stepsA.Count > 0 || stepsB.Count > 0)
             {
@@ -81,25 +72,16 @@ namespace Autopilot.Planning
                     reason: $"Delivering {bestSteps[0].CarNames} to {bestSteps[0].DestinationName}");
             }
 
-            // Check runarounds. When consolidation is needed (same dest on both
-            // sides), the runaround detaches one side, the loco keeps the other
-            // side's cars and goes around. The kept cars couple to the detached
-            // cars, consolidating everything to one side.
             Log(needsConsolidation
                 ? "Same destination on both sides — checking runaround to consolidate..."
                 : "No direct deliveries — checking runarounds...");
             var flippedA = layout.SideA.Reversed();
             var flippedB = layout.SideB.Reversed();
-            // Limit to a few steps for scoring — we only need to compare sides,
-            // not enumerate all 50+ cars.
-            var flippedStepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedA, _checker, skippedCars, maxSteps: 3);
-            var flippedStepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedB, _checker, skippedCars, maxSteps: 3);
+            var flippedStepsA = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedA, _checker, skippedCarIds, maxSteps: 3);
+            var flippedStepsB = _deliverabilityAnalyzer.GetDeliverableSteps(loco, flippedB, _checker, skippedCarIds, maxSteps: 3);
             int scoreA = flippedStepsA.Count;
             int scoreB = flippedStepsB.Count;
 
-            // When consolidation is needed, prefer the side whose flipped tail
-            // is directly deliverable. A deliverable tail means we can deliver
-            // immediately after consolidation without another runaround.
             if (needsConsolidation)
             {
                 bool aDeliverable = flippedStepsA.Count > 0;
@@ -111,23 +93,15 @@ namespace Autopilot.Planning
                     scoreB += 1000;
                 else
                 {
-                    // Both or neither deliverable — use shared car count as tiebreaker
-                    scoreA += CountSharedDestCarsFromWaybills(flippedStepsA, layout.SideB, skippedCars);
-                    scoreB += CountSharedDestCarsFromWaybills(flippedStepsB, layout.SideA, skippedCars);
+                    scoreA += CountSharedDestCarsFromWaybills(flippedStepsA, layout.SideB, skippedCarIds);
+                    scoreB += CountSharedDestCarsFromWaybills(flippedStepsB, layout.SideA, skippedCarIds);
                 }
             }
 
             Log($"Runaround scores: sideA={scoreA}, sideB={scoreB}");
 
-            // Single loop status check — used for both runaround feasibility
-            // and reposition decisions. CanRunaround = entire consist on loop.
             var loopStatus = _checker.GetLoopStatus(loco);
 
-            // The segment-based "on loop" check can fail when the LoopFinder's
-            // branch segment list is incomplete (missing segments that are
-            // physically part of the loop path). Fall back to route distance:
-            // if GetRepositionLocation finds the train is already very close
-            // to a loop (routeDist < trainLength), treat it as on-loop.
             if (!loopStatus.CanRunaround)
             {
                 float trainLen = _trainService.GetTrainLength(loco);
@@ -153,7 +127,7 @@ namespace Autopilot.Planning
 
             if (scoreA >= scoreB && scoreA > 0)
             {
-                var runaround = _runaroundBuilder.BuildRunaroundAction(loco, layout.SideA, Track.Graph.Shared, _trainService, _checker, skippedCars);
+                var runaround = _runaroundBuilder.BuildRunaroundAction(loco, layout.SideA, Track.Graph.Shared, _trainService, _checker, skippedCarIds);
                 if (runaround != null && loopStatus.CanRunaround)
                 {
                     var destName = flippedStepsA.Count > 0 ? flippedStepsA[0].DestinationName : "?";
@@ -169,7 +143,7 @@ namespace Autopilot.Planning
             }
             if (scoreB > 0)
             {
-                var runaround = _runaroundBuilder.BuildRunaroundAction(loco, layout.SideB, Track.Graph.Shared, _trainService, _checker, skippedCars);
+                var runaround = _runaroundBuilder.BuildRunaroundAction(loco, layout.SideB, Track.Graph.Shared, _trainService, _checker, skippedCarIds);
                 if (runaround != null && loopStatus.CanRunaround)
                 {
                     var destName = flippedStepsB.Count > 0 ? flippedStepsB[0].DestinationName : "?";
@@ -183,14 +157,11 @@ namespace Autopilot.Planning
                     : "SideB runaround not feasible — train not fully on loop");
             }
 
-            // Check if there ARE deliverable cars (just not from this position).
-            // Only count cars whose destinations have available space — cars
-            // for full sidings won't benefit from repositioning or runarounds.
             bool hasDeliverableCars = false;
             foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
             {
                 if (car.Waybill == null) continue;
-                if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
                 var space = _destinationSelector.GetAvailableSpace(car.Waybill.Value.Destination, loco);
                 if (space >= 2f)
                 {
@@ -203,17 +174,12 @@ namespace Autopilot.Planning
             {
                 Log("No runarounds feasible — checking reposition to loop...");
 
-                // Collect delivery span locations so the loop evaluator can verify
-                // approach feasibility from each candidate waypoint. Use the raw
-                // span lower bound (same target CheckApproachDirection routes to),
-                // not GetDestinationLocation which returns a coupling waypoint that
-                // may be on a different segment.
                 var deliveryDests = new List<SpanBoundary>();
                 var seenDestIds = new HashSet<string>();
                 foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
                 {
                     if (!WaybillHelper.IsPendingDelivery(car)) continue;
-                    if (skippedCars != null && skippedCars.Contains((car as CarAdapter)?.Car)) continue;
+                    if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
                     var dest = car.Waybill.Value.Destination;
                     if (!seenDestIds.Add(dest.Identifier)) continue;
                     foreach (var span in dest.Spans)
@@ -221,7 +187,7 @@ namespace Autopilot.Planning
                         if (span.lower != null)
                         {
                             var pos = DirectedPosition.FromLocation(span.lower.Value);
-                            var boundary = new SpanBoundary(pos.Segment, pos.DistanceFromA, pos.Facing);
+                            var boundary = new SpanBoundary(pos.Segment?.id, pos.DistanceFromA, pos.Facing);
                             deliveryDests.Add(boundary);
                             Log($"Delivery dest for reversal check: {dest.DisplayName} → {pos.Segment?.id}");
                             break;
@@ -233,8 +199,6 @@ namespace Autopilot.Planning
                 var (repositionLoc, loopKey) = _checker.GetRepositionLocation(loco, visitedSwitches, visitedLoopKeys, deliveryDests);
                 if (repositionLoc.HasValue)
                 {
-                    // Find a destination name for the reason message.
-                    // Try runaround candidates first, then any waybilled car.
                     string destName = null;
                     if (scoreA > 0 && flippedStepsA.Count > 0)
                         destName = flippedStepsA[0].DestinationName;
@@ -244,7 +208,7 @@ namespace Autopilot.Planning
                     {
                         foreach (var car in layout.SideA.Cars.Concat(layout.SideB.Cars))
                         {
-                            if (car.Waybill != null && (skippedCars == null || !skippedCars.Contains((car as CarAdapter)?.Car)))
+                            if (car.Waybill != null && (skippedCarIds == null || !skippedCarIds.Contains(car.id)))
                             {
                                 destName = car.Waybill.Value.Destination.DisplayName;
                                 break;
@@ -255,18 +219,22 @@ namespace Autopilot.Planning
                         ? $"Repositioning to loop (need runaround to deliver to {destName})"
                         : "Repositioning to loop";
 
+                    // Convert DirectedPosition to GraphPosition for the plan
+                    var gpReposition = new GraphPosition(repositionLoc.Value.Segment?.id,
+                        repositionLoc.Value.DistanceFromA, repositionLoc.Value.Facing);
+
                     Log(reason);
                     return new DeliveryPlan(new List<DeliveryStep>(), warnings,
-                        repositionLocation: repositionLoc.Value, reason: reason,
+                        repositionLocation: gpReposition, reason: reason,
                         repositionLoopKey: loopKey);
                 }
             }
 
-            // Split is last resort — dropped cars block the railway.
+            // Split is last resort
             Log("No reposition available — checking splits...");
             var splitFinder = new SplitFinder(_trainService, _checker, _destinationSelector);
-            var splitA = layout.SideA.IsEmpty ? null : splitFinder.FindBestSplit(loco, layout.SideA, skippedCars);
-            var splitB = layout.SideB.IsEmpty ? null : splitFinder.FindBestSplit(loco, layout.SideB, skippedCars);
+            var splitA = layout.SideA.IsEmpty ? null : splitFinder.FindBestSplit(loco, layout.SideA, skippedCarIds);
+            var splitB = layout.SideB.IsEmpty ? null : splitFinder.FindBestSplit(loco, layout.SideB, skippedCarIds);
 
             var bestSplit = splitA;
             if (splitB != null && (bestSplit == null || splitB.DroppedCars.Count < bestSplit.DroppedCars.Count))
@@ -283,10 +251,6 @@ namespace Autopilot.Planning
             return new DeliveryPlan(new List<DeliveryStep>(), warnings);
         }
 
-        /// <summary>
-        /// Count cars in otherSteps whose destination matches any destination in flippedSteps.
-        /// Used to boost runaround scores for consolidation.
-        /// </summary>
         private static int CountSharedDestCars(List<DeliveryStep> flippedSteps, List<DeliveryStep> otherSteps)
         {
             var dests = new HashSet<string>();
@@ -302,9 +266,6 @@ namespace Autopilot.Planning
             return count;
         }
 
-        /// <summary>
-        /// Check if any destination appears in both step lists.
-        /// </summary>
         private static bool SharesDestination(List<DeliveryStep> stepsA, List<DeliveryStep> stepsB)
         {
             var destsA = new HashSet<string>();
@@ -318,12 +279,8 @@ namespace Autopilot.Planning
             return false;
         }
 
-        /// <summary>
-        /// Count cars on the other side whose destination matches a destination
-        /// in the flipped steps. Uses raw waybills from the other side's CarGroup.
-        /// </summary>
         private static int CountSharedDestCarsFromWaybills(
-            List<DeliveryStep> flippedSteps, CarGroup otherSide, IEnumerable<Car>? skippedCars)
+            List<DeliveryStep> flippedSteps, CarGroup otherSide, IEnumerable<string>? skippedCarIds)
         {
             var dests = new HashSet<string>();
             foreach (var step in flippedSteps)
@@ -333,19 +290,14 @@ namespace Autopilot.Planning
             foreach (var car in otherSide.Cars)
             {
                 if (car.Waybill == null) continue;
-                var gameCar = (car as CarAdapter)?.Car;
-                if (skippedCars != null && gameCar != null && skippedCars.Contains(gameCar)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
                 if (dests.Contains(car.Waybill.Value.Destination.DisplayName))
                     count++;
             }
             return count;
         }
 
-        /// <summary>
-        /// Check if both sides of the consist have waybilled cars for the
-        /// same destination. Uses raw waybill data, not deliverability.
-        /// </summary>
-        private static bool SidesShareDestination(CarGroup sideA, CarGroup sideB, IEnumerable<Car>? skippedCars)
+        private static bool SidesShareDestination(CarGroup sideA, CarGroup sideB, IEnumerable<string>? skippedCarIds)
         {
             if (sideA.IsEmpty || sideB.IsEmpty) return false;
 
@@ -353,40 +305,53 @@ namespace Autopilot.Planning
             foreach (var car in sideA.Cars)
             {
                 if (car.Waybill == null) continue;
-                var gameCar = (car as CarAdapter)?.Car;
-                if (skippedCars != null && gameCar != null && skippedCars.Contains(gameCar)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
                 destsA.Add(car.Waybill.Value.Destination.DisplayName);
             }
 
             foreach (var car in sideB.Cars)
             {
                 if (car.Waybill == null) continue;
-                var gameCar = (car as CarAdapter)?.Car;
-                if (skippedCars != null && gameCar != null && skippedCars.Contains(gameCar)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
                 if (destsA.Contains(car.Waybill.Value.Destination.DisplayName))
                     return true;
             }
             return false;
         }
 
-        /// <summary>
-        /// Pick the better delivery side. Prefer more deliverable steps;
-        /// when equal, prefer the side whose first delivery is closer.
-        /// </summary>
         private List<DeliveryStep> PickCloserDelivery(BaseLocomotive loco,
             List<DeliveryStep> stepsA, List<DeliveryStep> stepsB)
         {
             if (stepsA.Count == 0) return stepsB;
             if (stepsB.Count == 0) return stepsA;
 
-            // More deliverable steps wins
             if (stepsA.Count != stepsB.Count)
                 return stepsA.Count > stepsB.Count ? stepsA : stepsB;
 
-            // Equal count — prefer closer first delivery (check both loco directions)
-            float distA = _trainService.GraphDistanceToLoco(loco, stepsA[0].DestinationLocation)?.Distance ?? float.MaxValue;
-            float distB = _trainService.GraphDistanceToLoco(loco, stepsB[0].DestinationLocation)?.Distance ?? float.MaxValue;
+            // Convert GraphPosition to DirectedPosition for distance check
+            var adapter = new TrackGraph.GameGraphAdapter();
+            var dpA = ConvertToDirectedPosition(stepsA[0].DestinationLocation, adapter);
+            var dpB = ConvertToDirectedPosition(stepsB[0].DestinationLocation, adapter);
+            float distA = _trainService.GraphDistanceToLoco(loco, dpA)?.Distance ?? float.MaxValue;
+            float distB = _trainService.GraphDistanceToLoco(loco, dpB)?.Distance ?? float.MaxValue;
             return distA <= distB ? stepsA : stepsB;
+        }
+
+        private static DirectedPosition ConvertToDirectedPosition(GraphPosition gp, TrackGraph.GameGraphAdapter adapter)
+        {
+            if (gp.SegmentId != null)
+            {
+                var graph = Track.Graph.Shared;
+                foreach (var seg in graph.Segments)
+                {
+                    if (seg.id == gp.SegmentId)
+                    {
+                        adapter.RegisterSegment(seg);
+                        break;
+                    }
+                }
+            }
+            return adapter.ToDirectedPosition(gp);
         }
     }
 }

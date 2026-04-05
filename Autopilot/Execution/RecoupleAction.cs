@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Model;
 using Model.AI;
 using Track;
@@ -12,6 +14,7 @@ namespace Autopilot.Execution
         private enum Phase { MovingToDropPoint, Stabilizing }
 
         private readonly SplitInfo _split;
+        private readonly List<Car> _droppedCars;
         private Car _coupleTarget;
         private string _initError;
         private Phase _phase;
@@ -22,18 +25,15 @@ namespace Autopilot.Execution
         public RecoupleAction(SplitInfo split, BaseLocomotive loco, TrainService trainService)
         {
             _split = split;
+            _droppedCars = PlanUnwrapper.UnwrapCars(split.DroppedCars);
             StatusMessage = "Returning to recouple dropped cars...";
 
             // Pick the closest reachable end of the dropped car chain.
-            // The planner will handle runarounds if needed after recoupling.
             var graph = Graph.Shared;
-            var firstDropped = split.DroppedCars[0];
-            var lastDropped = split.DroppedCars[split.DroppedCars.Count - 1];
+            var firstDropped = _droppedCars[0];
+            var lastDropped = _droppedCars[_droppedCars.Count - 1];
             var locoPos = DirectedPosition.FromLocation(loco.LocationF);
 
-            // Use the free (uncoupled) end of each end car — not crow-flies
-            // nearest, which can pick the coupled end and place the waypoint
-            // between cars in the chain.
             var firstFreeEnd = firstDropped.CoupledTo(Car.LogicalEnd.A) != null
                 ? Car.LogicalEnd.B : Car.LogicalEnd.A;
             var lastFreeEnd = lastDropped.CoupledTo(Car.LogicalEnd.A) != null
@@ -115,7 +115,7 @@ namespace Autopilot.Execution
                         return new InProgress();
 
                     Loader.Mod.Logger.Log("Autopilot Recouple: connecting air and releasing handbrakes");
-                    foreach (var car in _split.DroppedCars)
+                    foreach (var car in _droppedCars)
                         trainService.SetHandbrake(car, false);
                     trainService.ConnectAirOnCoupled(loco);
                     trainService.UpdateCarsForAE(loco);

@@ -26,6 +26,9 @@ namespace Autopilot.Execution
         private bool _coupleVerified;
         private bool _coupleRetried;
 
+        // Unwrapped game types for execution
+        private readonly Car? _coupleTargetCar;
+
         public string StatusMessage => _statusMessage;
 
         public DeliveryAction(DeliveryStep step, BaseLocomotive loco, TrainService trainService)
@@ -36,14 +39,17 @@ namespace Autopilot.Execution
             _phase = Phase.MovingToSiding;
             _waitTimer = 0f;
 
-            if (step.CoupleTarget != null)
+            // Unwrap couple target once
+            _coupleTargetCar = step.CoupleTarget != null ? PlanUnwrapper.UnwrapCar(step.CoupleTarget) : null;
+
+            if (_coupleTargetCar != null)
             {
                 // Couple to existing car on the span. Use the free (uncoupled)
                 // end — that's the end facing the approach. For a lone car
                 // (both ends free), pick the end closer to the loco by graph
                 // distance — LogicalEnd.A is arbitrary and may face the buffer.
                 var graph = Graph.Shared;
-                var target = step.CoupleTarget;
+                var target = _coupleTargetCar;
                 bool aFree = target.CoupledTo(Car.LogicalEnd.A) == null;
                 bool bFree = target.CoupledTo(Car.LogicalEnd.B) == null;
                 Car.LogicalEnd nearEnd;
@@ -61,9 +67,9 @@ namespace Autopilot.Execution
                 var coupleLoc = CoupleLocationCalculator.GetCoupleLocationForEnd(
                     new CarAdapter(target), nearEnd, graph);
                 var coupleLocStr = Graph.Shared.LocationToString(coupleLoc.ToLocation());
-                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling to {step.CoupleTarget.DisplayName} " +
+                Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling to {target.DisplayName} " +
                     $"at end {nearEnd}, waypoint={coupleLocStr}");
-                trainService.SetWaypointWithCouple(loco, coupleLoc, step.CoupleTarget.id);
+                trainService.SetWaypointWithCouple(loco, coupleLoc, target.id);
             }
             else
             {
@@ -124,12 +130,10 @@ namespace Autopilot.Execution
                 return new InProgress();
 
             // If a couple target was set, verify coupling actually happened.
-            // The AE waypoint can be satisfied before physical coupling occurs
-            // (same pattern as PickupAction's explicit coupling check).
-            if (_step.CoupleTarget != null && !_coupleVerified)
+            if (_coupleTargetCar != null && !_coupleVerified)
             {
                 var consist = trainService.GetCoupled(loco);
-                if (consist.Contains(_step.CoupleTarget))
+                if (consist.Contains(_coupleTargetCar))
                 {
                     Loader.Mod.Logger.Log("Autopilot DeliveryAction: couple target verified in consist.");
                     _coupleVerified = true;
@@ -140,8 +144,8 @@ namespace Autopilot.Execution
                     // make physical contact and trigger auto-coupling.
                     _coupleRetried = true;
                     var graph = Track.Graph.Shared;
-                    graph.TryFindDistance(loco.LocationF, _step.CoupleTarget.LocationA, out float dF, out _);
-                    graph.TryFindDistance(loco.LocationR, _step.CoupleTarget.LocationA, out float dR, out _);
+                    graph.TryFindDistance(loco.LocationF, _coupleTargetCar.LocationA, out float dF, out _);
+                    graph.TryFindDistance(loco.LocationR, _coupleTargetCar.LocationA, out float dR, out _);
                     bool pushForward = dF < dR;
                     Loader.Mod.Logger.Log($"Autopilot DeliveryAction: coupling not detected, nudging {(pushForward ? "forward" : "backward")}...");
                     trainService.MoveDistance(loco, 2f, pushForward);
@@ -162,15 +166,16 @@ namespace Autopilot.Execution
         {
             var layout = ConsistLayout.Create(loco, trainService);
 
-            Loader.Mod.Logger.Log($"Autopilot Uncouple: dropping {_step.Cars.Count} car(s) [{string.Join(", ", _step.Cars.ConvertAll(c => c.DisplayName))}]");
+            var stepCarNames = string.Join(", ", _step.Cars.Select(c => c.DisplayName));
+            Loader.Mod.Logger.Log($"Autopilot Uncouple: dropping {_step.Cars.Count} car(s) [{stepCarNames}]");
             Loader.Mod.Logger.Log($"Autopilot Uncouple: sideA={layout.SideA.Count} cars [{string.Join(", ", layout.SideA.Cars.Select(c => c.DisplayName))}]");
             Loader.Mod.Logger.Log($"Autopilot Uncouple: sideB={layout.SideB.Count} cars [{string.Join(", ", layout.SideB.Cars.Select(c => c.DisplayName))}]");
 
-            _completedCars = new List<Car>(_step.Cars);
+            _completedCars = PlanUnwrapper.UnwrapCars(_step.Cars);
 
-            var cutPoint = CutPointFinder.FindCutPoint(layout.SideA, _step.Cars);
+            var cutPoint = CutPointFinder.FindCutPoint(layout.SideA, _completedCars);
             if (cutPoint.car == null)
-                cutPoint = CutPointFinder.FindCutPoint(layout.SideB, _step.Cars);
+                cutPoint = CutPointFinder.FindCutPoint(layout.SideB, _completedCars);
 
             if (cutPoint.car == null)
                 return new ActionFailed("Cannot find cut point — cars may have been rearranged.");
@@ -180,7 +185,7 @@ namespace Autopilot.Execution
             trainService.Uncouple(cutPoint.car, cutPoint.end);
             trainService.UpdateCarsForAE(loco);
 
-            DisconnectHelper.DisconnectCars(_step.Cars, trainService);
+            DisconnectHelper.DisconnectCars(_completedCars, trainService);
 
             _phase = Phase.Uncoupling;
             _waitTimer = 0f;
@@ -192,14 +197,13 @@ namespace Autopilot.Execution
             _waitTimer += AutopilotController.TickInterval;
 
             var consist = trainService.GetCoupled(loco);
-            var carsToCheck = _completedCars ?? _step.Cars;
+            var carsToCheck = _completedCars;
             bool stillCoupled = carsToCheck.Any(c => consist.Contains(c));
 
             if (!stillCoupled)
             {
                 // Back away half a car length to clear the uncoupled cars.
-                // Uses raw game Location for TryFindDistance — game API boundary
-                var droppedCar = _step.Cars[0];
+                var droppedCar = _completedCars[0];
                 var graph = Track.Graph.Shared;
                 graph.TryFindDistance(loco.LocationF, droppedCar.LocationA, out float distF, out _);
                 graph.TryFindDistance(loco.LocationR, droppedCar.LocationA, out float distR, out _);
@@ -222,8 +226,6 @@ namespace Autopilot.Execution
         {
             if (trainService.IsStoppedForDuration(loco, 0.5f))
             {
-                // Yard mode persists after MoveDistance completes — switch back
-                // to waypoint mode so the AE is ready for the next action.
                 trainService.StopAE(loco);
                 return new ActionReplan();
             }
@@ -232,8 +234,6 @@ namespace Autopilot.Execution
 
         /// <summary>
         /// Shortest graph distance from either loco end to a target location.
-        /// Checks both LocationF and LocationR since RouteSearch only exits
-        /// the starting segment in one direction.
         /// </summary>
         private static float LocoDistanceTo(Graph graph, BaseLocomotive loco, Location target)
         {
@@ -247,28 +247,52 @@ namespace Autopilot.Execution
 
         /// <summary>
         /// Find the deepest point within the destination span — the span
-        /// endpoint farthest from the loco. This ensures the train pushes
-        /// all the way into the siding. Stays within span bounds so the
-        /// waypoint is always on valid siding track.
+        /// endpoint farthest from the loco. Uses the car's waybill to find
+        /// span endpoints since DeliveryStep no longer carries OpsCarPosition.
         /// </summary>
         private static DirectedPosition GetDeepestSpanLocation(BaseLocomotive loco, DeliveryStep step)
         {
             var graph = Graph.Shared;
-            DirectedPosition best = step.DestinationLocation;
+            // Default to step's DestinationLocation (converted from GraphPosition)
+            var adapter = new Autopilot.TrackGraph.GameGraphAdapter();
+            // Register the segment from DestinationLocation
+            if (step.DestinationLocation.SegmentId != null)
+            {
+                var allSegs = graph.Segments;
+                foreach (var seg in allSegs)
+                {
+                    if (seg.id == step.DestinationLocation.SegmentId)
+                    {
+                        adapter.RegisterSegment(seg);
+                        break;
+                    }
+                }
+            }
+            DirectedPosition best = adapter.ToDirectedPosition(step.DestinationLocation);
             float bestDist = 0f;
 
-            var span = step.Destination.Spans[step.SpanIndex];
-            foreach (var ep in new[] { span.lower, span.upper })
+            // Find the OpsCarPosition from the first car's waybill to access span endpoints
+            var firstCar = step.Cars.Count > 0 ? step.Cars[0] : null;
+            var waybill = firstCar?.Waybill;
+            if (waybill != null)
             {
-                if (!ep.HasValue || ep.Value.segment == null) continue;
-
-                graph.TryFindDistance(loco.LocationF, ep.Value, out float dF, out _);
-                graph.TryFindDistance(loco.LocationR, ep.Value, out float dR, out _);
-                float dist = Math.Max(dF, dR);
-                if (dist > bestDist)
+                var destination = waybill.Value.Destination;
+                if (step.SpanIndex < destination.Spans.Length)
                 {
-                    bestDist = dist;
-                    best = DirectedPosition.FromLocation(ep.Value);
+                    var span = destination.Spans[step.SpanIndex];
+                    foreach (var ep in new[] { span.lower, span.upper })
+                    {
+                        if (!ep.HasValue || ep.Value.segment == null) continue;
+
+                        graph.TryFindDistance(loco.LocationF, ep.Value, out float dF, out _);
+                        graph.TryFindDistance(loco.LocationR, ep.Value, out float dR, out _);
+                        float dist = Math.Max(dF, dR);
+                        if (dist > bestDist)
+                        {
+                            bestDist = dist;
+                            best = DirectedPosition.FromLocation(ep.Value);
+                        }
+                    }
                 }
             }
 

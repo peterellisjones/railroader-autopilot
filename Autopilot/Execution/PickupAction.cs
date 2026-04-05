@@ -12,6 +12,7 @@ namespace Autopilot.Execution
         private enum Phase { MovingToTarget, Stabilizing }
 
         private readonly PickupTarget _target;
+        private readonly Car _coupleTargetCar;
         private Phase _phase;
         private float _waitTimer;
         private float _stuckTimer;
@@ -27,10 +28,13 @@ namespace Autopilot.Execution
         public PickupAction(PickupTarget target, BaseLocomotive loco, TrainService trainService)
         {
             _target = target;
+            _coupleTargetCar = PlanUnwrapper.UnwrapCar(target.CoupleTarget);
             StatusMessage = $"Moving to pick up {target.CoupleTarget.DisplayName}...";
 
+            var coupleLocation = PlanUnwrapper.ToCoupleWaypoint(target.CoupleLocation,
+                CreateAdapter(target.CoupleLocation.SegmentId));
             Loader.Mod.Logger.Log($"Autopilot Pickup: setting waypoint to couple with {target.CoupleTarget.DisplayName}");
-            trainService.SetWaypointWithCouple(loco, target.CoupleLocation, target.CoupleTarget.id);
+            trainService.SetWaypointWithCouple(loco, coupleLocation, target.CoupleTarget.id);
 
             _phase = Phase.MovingToTarget;
             _waitTimer = 0f;
@@ -47,7 +51,7 @@ namespace Autopilot.Execution
                         return new ActionFailed("Player took manual control during pickup — autopilot paused.");
 
                     var consist = trainService.GetCoupled(loco);
-                    if (consist.Contains(_target.CoupleTarget))
+                    if (consist.Contains(_coupleTargetCar))
                     {
                         Loader.Mod.Logger.Log("Autopilot Pickup: coupling detected");
                         StatusMessage = "Coupled — waiting for stop...";
@@ -69,17 +73,13 @@ namespace Autopilot.Execution
                         || status.Contains("End of Track") || status.Contains("too long"))
                     {
                         Loader.Mod.Logger.Log($"Autopilot Pickup: can't reach {_target.CoupleTarget.DisplayName}: {status} — skipping approach");
-                        return new ActionReplan(new List<Car> { _target.CoupleTarget });
+                        return new ActionReplan(new List<ICar> { _target.CoupleTarget });
                     }
 
-                    // If the AE isn't moving toward the car, skip this
-                    // approach but only mark the couple target as skipped —
-                    // not all target cars. The same chain may be reachable
-                    // from its other end on the next planning cycle.
                     if (wpSatisfied || (stopped && status.Contains("At waypoint") && _stuckTimer > 5f))
                     {
                         Loader.Mod.Logger.Log($"Autopilot Pickup: AE not moving to {_target.CoupleTarget.DisplayName} (status={status}) — skipping approach");
-                        return new ActionReplan(new List<Car> { _target.CoupleTarget });
+                        return new ActionReplan(new List<ICar> { _target.CoupleTarget });
                     }
 
                     if (trainService.IsStopped(loco))
@@ -97,7 +97,7 @@ namespace Autopilot.Execution
                 case Phase.Stabilizing:
                     // Verify still coupled (bounce detection)
                     var consist2 = trainService.GetCoupled(loco);
-                    if (!consist2.Contains(_target.CoupleTarget))
+                    if (!consist2.Contains(_coupleTargetCar))
                     {
                         _phase = Phase.MovingToTarget;
                         return new InProgress();
@@ -118,6 +118,24 @@ namespace Autopilot.Execution
                 default:
                     return new InProgress();
             }
+        }
+
+        private static Autopilot.TrackGraph.GameGraphAdapter CreateAdapter(string segmentId)
+        {
+            var adapter = new Autopilot.TrackGraph.GameGraphAdapter();
+            if (segmentId != null)
+            {
+                var graph = Track.Graph.Shared;
+                foreach (var seg in graph.Segments)
+                {
+                    if (seg.id == segmentId)
+                    {
+                        adapter.RegisterSegment(seg);
+                        break;
+                    }
+                }
+            }
+            return adapter;
         }
     }
 }

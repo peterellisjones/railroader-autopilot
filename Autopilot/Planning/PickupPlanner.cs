@@ -253,7 +253,7 @@ namespace Autopilot.Planning
         /// Returns null if no more targets are reachable.
         /// </summary>
         public PickupTarget? FindNextPickup(BaseLocomotive loco, PickupFilter filter,
-            HashSet<Car>? skippedCars = null)
+            HashSet<string>? skippedCarIds = null)
         {
             _trainService.ClearPlanCaches();
             var nearbyCars = _trainService.GetNearbyCars(loco);
@@ -280,7 +280,7 @@ namespace Autopilot.Planning
             var matchingCars = new Dictionary<string, Car>();
             foreach (var car in nearbyCars)
             {
-                if (skippedCars != null && skippedCars.Contains(car)) continue;
+                if (skippedCarIds != null && skippedCarIds.Contains(car.id)) continue;
 
                 // Crow-flies distance pre-filter
                 var carPos = car.GetCenterPosition(graph);
@@ -370,7 +370,7 @@ namespace Autopilot.Planning
                         endsToTry = new[] { freeEnd };
                     }
 
-                    CoupleWaypoint coupleLocation = default;
+                    GraphCoupleWaypoint coupleLocation = default;
                     float distance = float.MaxValue;
                     bool reachable = false;
 
@@ -400,7 +400,8 @@ namespace Autopilot.Planning
                         Log($"Trying {target.DisplayName} end {logicalEnd}: waypoint on {testLoc.segment?.id}|{testLoc.distance:F1}, dist={routeDist:F0}");
                         if (routeDist < distance)
                         {
-                            coupleLocation = coupleWp;
+                            coupleLocation = new GraphCoupleWaypoint(
+                                coupleWp.Segment?.id, coupleWp.DistanceFromA, coupleWp.Facing);
                             distance = routeDist;
                             reachable = true;
                         }
@@ -409,9 +410,10 @@ namespace Autopilot.Planning
                     if (!reachable)
                         continue;
 
-                    var targetCars = targets.Select(c => (c as CarAdapter)?.Car).Where(c => c != null).ToList()!;
+                    var targetCars = targets.ToList();
+                    ICar coupleTargetICar = orientation[0];
                     candidates.Add((new PickupTarget(
-                        coupleTarget, coupleLocation, targetCars!), distance));
+                        coupleTargetICar, coupleLocation, targetCars), distance));
                 }
             }
 

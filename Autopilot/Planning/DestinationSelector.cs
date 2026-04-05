@@ -71,12 +71,12 @@ namespace Autopilot.Planning
                 if (lower != null)
                 {
                     var lowerPos = DirectedPosition.FromLocation(lower.Value);
-                    spanApproach = new SpanBoundary(lowerPos.Segment, lowerPos.DistanceFromA, lowerPos.Facing);
+                    spanApproach = new SpanBoundary(lowerPos.Segment?.id, lowerPos.DistanceFromA, lowerPos.Facing);
                 }
                 else
                 {
                     var upperPos = DirectedPosition.FromLocation(upper.Value);
-                    spanApproach = new SpanBoundary(upperPos.Segment, upperPos.DistanceFromA, upperPos.Facing);
+                    spanApproach = new SpanBoundary(upperPos.Segment?.id, upperPos.DistanceFromA, upperPos.Facing);
                 }
 
                 // Find existing cars on this span and compute occupied space.

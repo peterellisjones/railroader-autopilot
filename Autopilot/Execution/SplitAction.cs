@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Model;
 using Autopilot.Model;
@@ -10,6 +11,8 @@ namespace Autopilot.Execution
         private enum Phase { Uncoupling, WaitingForDecouple }
 
         private readonly SplitInfo _split;
+        private readonly Car _splitCar;
+        private readonly List<Car> _droppedCars;
         private Phase _phase;
         private float _waitTimer;
 
@@ -18,13 +21,15 @@ namespace Autopilot.Execution
         public SplitAction(SplitInfo split, BaseLocomotive loco, TrainService trainService)
         {
             _split = split;
+            _splitCar = PlanUnwrapper.UnwrapCar(split.SplitCar);
+            _droppedCars = PlanUnwrapper.UnwrapCars(split.DroppedCars);
             StatusMessage = $"Splitting train — dropping {split.DroppedCars.Count} car(s)...";
 
-            Loader.Mod.Logger.Log($"Autopilot Split: uncoupling at {split.SplitCar.DisplayName} end {split.SplitEnd}");
-            trainService.Uncouple(split.SplitCar, split.SplitEnd);
+            Loader.Mod.Logger.Log($"Autopilot Split: uncoupling at {_splitCar.DisplayName} end {split.SplitEnd}");
+            trainService.Uncouple(_splitCar, split.SplitEnd);
             trainService.UpdateCarsForAE(loco);
 
-            DisconnectHelper.DisconnectCars(split.DroppedCars, trainService);
+            DisconnectHelper.DisconnectCars(_droppedCars, trainService);
 
             _phase = Phase.Uncoupling;
             _waitTimer = 0f;
@@ -38,7 +43,7 @@ namespace Autopilot.Execution
             {
                 case Phase.Uncoupling:
                     var consist = trainService.GetCoupled(loco);
-                    bool stillCoupled = _split.DroppedCars.Any(c => consist.Contains(c));
+                    bool stillCoupled = _droppedCars.Any(c => consist.Contains(c));
 
                     if (!stillCoupled)
                     {

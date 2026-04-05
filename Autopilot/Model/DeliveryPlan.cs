@@ -6,7 +6,7 @@ namespace Autopilot.Model
     {
         public List<DeliveryStep> Steps { get; }
         public RunaroundAction? Runaround { get; }
-        public DirectedPosition? RepositionLocation { get; }
+        public GraphPosition? RepositionLocation { get; }
         public string? RepositionLoopKey { get; }
         public SplitInfo? Split { get; }
         public List<string> Warnings { get; }
@@ -14,7 +14,7 @@ namespace Autopilot.Model
         public string? Reason { get; }
 
         public DeliveryPlan(List<DeliveryStep> steps, List<string> warnings,
-            RunaroundAction? runaround = null, DirectedPosition? repositionLocation = null,
+            RunaroundAction? runaround = null, GraphPosition? repositionLocation = null,
             SplitInfo? split = null, string? reason = null,
             string? repositionLoopKey = null)
         {

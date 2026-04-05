@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Model;
+using Autopilot.Model;
 
 namespace Autopilot.Execution
 {
@@ -9,7 +9,7 @@ namespace Autopilot.Execution
 
     public sealed record ActionDone : ActionOutcome;
 
-    public sealed record ActionReplan(List<Car>? SkippedCars = null) : ActionOutcome;
+    public sealed record ActionReplan(List<ICar>? SkippedCars = null) : ActionOutcome;
 
     public sealed record ActionFailed(string Reason) : ActionOutcome;
 }

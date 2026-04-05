@@ -1,3 +1,4 @@
+using System.Linq;
 using Model;
 using Autopilot.Model;
 using Autopilot.Services;
@@ -16,6 +17,8 @@ namespace Autopilot.Execution
         }
 
         private readonly RunaroundAction _runaround;
+        private readonly Car _splitCar;
+        private readonly Car _coupleTargetCar;
         private Phase _phase;
         private float _waitTimer;
         private float _stuckTimer;
@@ -27,21 +30,22 @@ namespace Autopilot.Execution
         public RunaroundExecutionAction(RunaroundAction runaround, BaseLocomotive loco, TrainService trainService)
         {
             _runaround = runaround;
+            _splitCar = PlanUnwrapper.UnwrapCar(runaround.SplitCar);
+            _coupleTargetCar = PlanUnwrapper.UnwrapCar(runaround.CoupleTarget);
 
             var consist = trainService.GetCoupled(loco);
-            var splitCar = runaround.SplitCar;
             var splitEnd = runaround.SplitEnd;
 
             // Verify the split car is still in the consist
-            if (!consist.Contains(splitCar))
+            if (!consist.Contains(_splitCar))
             {
                 _initError = "Runaround failed — consist has changed.";
                 _statusMessage = _initError;
                 return;
             }
 
-            Loader.Mod.Logger.Log($"Autopilot Runaround: uncoupling {splitCar.DisplayName} at end {splitEnd}, CoupledTo(A)={splitCar.CoupledTo(Car.LogicalEnd.A)?.DisplayName ?? "null"}, CoupledTo(B)={splitCar.CoupledTo(Car.LogicalEnd.B)?.DisplayName ?? "null"}");
-            trainService.Uncouple(splitCar, splitEnd);
+            Loader.Mod.Logger.Log($"Autopilot Runaround: uncoupling {_splitCar.DisplayName} at end {splitEnd}, CoupledTo(A)={_splitCar.CoupledTo(Car.LogicalEnd.A)?.DisplayName ?? "null"}, CoupledTo(B)={_splitCar.CoupledTo(Car.LogicalEnd.B)?.DisplayName ?? "null"}");
+            trainService.Uncouple(_splitCar, splitEnd);
             trainService.UpdateCarsForAE(loco);
 
             // Set handbrakes and bleed air on disconnected cars
@@ -81,7 +85,7 @@ namespace Autopilot.Execution
             _waitTimer += AutopilotController.TickInterval;
 
             var consist = trainService.GetCoupled(loco);
-            bool stillInConsist = consist.Contains(_runaround.SplitCar);
+            bool stillInConsist = consist.Contains(_splitCar);
             if (stillInConsist)
             {
                 if (_waitTimer > AutopilotConstants.DecoupleWaitSeconds)
@@ -98,7 +102,7 @@ namespace Autopilot.Execution
         {
             _waitTimer += AutopilotController.TickInterval;
 
-            if (trainService.IsCoupled(_runaround.SplitCar, _runaround.SplitEnd))
+            if (trainService.IsCoupled(_splitCar, _runaround.SplitEnd))
             {
                 _waitTimer = 0f;
                 return new InProgress();
@@ -121,17 +125,13 @@ namespace Autopilot.Execution
 
         private ActionOutcome TickSettingWaypoint(BaseLocomotive loco, TrainService trainService)
         {
-            var target = _runaround.CoupleTarget;
+            // Use the pre-computed couple location from planning. Convert to game type.
+            var coupleLocation = PlanUnwrapper.ToCoupleWaypoint(_runaround.CoupleLocation,
+                CreateAdapter(_runaround.CoupleLocation.SegmentId));
 
-            // Use the pre-computed couple location from planning. It was calculated
-            // when the loco was on the correct side of the cars, targeting the far
-            // end of the cut. Recomputing now would use the current loco position
-            // (right next to the uncoupled cars) and pick the wrong end.
-            var coupleLocation = _runaround.CoupleLocation;
-
-            Loader.Mod.Logger.Log($"Autopilot Runaround: setting coupling waypoint to {target.DisplayName}");
-            _statusMessage = $"Runaround: routing to {target.DisplayName}...";
-            trainService.SetWaypointWithCouple(loco, coupleLocation, target.id);
+            Loader.Mod.Logger.Log($"Autopilot Runaround: setting coupling waypoint to {_coupleTargetCar.DisplayName}");
+            _statusMessage = $"Runaround: routing to {_coupleTargetCar.DisplayName}...";
+            trainService.SetWaypointWithCouple(loco, coupleLocation, _coupleTargetCar.id);
 
             _phase = Phase.WaitingForCouple;
             _waitTimer = 0f;
@@ -143,18 +143,17 @@ namespace Autopilot.Execution
             _waitTimer += AutopilotController.TickInterval;
 
             var consist = trainService.GetCoupled(loco);
-            bool coupled = consist.Contains(_runaround.CoupleTarget);
+            bool coupled = consist.Contains(_coupleTargetCar);
 
             if (coupled)
             {
                 Loader.Mod.Logger.Log($"Autopilot Runaround: coupling detected — releasing handbrakes and connecting air");
 
-                // Release handbrakes and connect air immediately on coupling,
-                // not after stabilizing. If we wait, the braked cars prevent
-                // the AE from properly stopping, and the bled air means
-                // the train has no working brakes.
                 foreach (var car in _runaround.DisconnectedCars)
-                    trainService.SetHandbrake(car, false);
+                {
+                    var gameCar = (car as CarAdapter)?.Car;
+                    if (gameCar != null) trainService.SetHandbrake(gameCar, false);
+                }
                 trainService.ConnectAirOnCoupled(loco);
                 trainService.UpdateCarsForAE(loco);
 
@@ -187,7 +186,7 @@ namespace Autopilot.Execution
             _waitTimer += AutopilotController.TickInterval;
 
             var consist = trainService.GetCoupled(loco);
-            bool coupled = consist.Contains(_runaround.CoupleTarget);
+            bool coupled = consist.Contains(_coupleTargetCar);
 
             if (!coupled)
             {
@@ -203,6 +202,24 @@ namespace Autopilot.Execution
 
             _statusMessage = "Runaround complete — re-planning...";
             return new ActionReplan();
+        }
+
+        private static Autopilot.TrackGraph.GameGraphAdapter CreateAdapter(string segmentId)
+        {
+            var adapter = new Autopilot.TrackGraph.GameGraphAdapter();
+            if (segmentId != null)
+            {
+                var graph = Track.Graph.Shared;
+                foreach (var seg in graph.Segments)
+                {
+                    if (seg.id == segmentId)
+                    {
+                        adapter.RegisterSegment(seg);
+                        break;
+                    }
+                }
+            }
+            return adapter;
         }
     }
 }

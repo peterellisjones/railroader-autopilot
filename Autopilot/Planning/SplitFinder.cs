@@ -25,14 +25,7 @@ namespace Autopilot.Planning
         private void Log(string msg) => Loader.Mod.Logger.Log($"Autopilot SplitFinder: {msg}");
         private void LogDebug(string msg) { if (Loader.Settings?.verboseLogging == true) Log(msg); }
 
-        /// <summary>
-        /// Find the best split point for the train. Groups cars by destination,
-        /// tries progressively longer kept-car prefixes from the loco end.
-        /// Returns SplitInfo for the split that maximizes deliverable cars
-        /// with routes that don't pass through blocked switches.
-        /// Returns null if no valid split found.
-        /// </summary>
-        public SplitInfo? FindBestSplit(BaseLocomotive loco, CarGroup group, IEnumerable<Car>? skippedCars = null)
+        public SplitInfo? FindBestSplit(BaseLocomotive loco, CarGroup group, IEnumerable<string>? skippedCarIds = null)
         {
             if (group.IsEmpty || group.Count < 2)
                 return null;
@@ -40,16 +33,12 @@ namespace Autopilot.Planning
             var cars = group.Cars;
             var graph = Graph.Shared;
 
-            // Group cars by destination from loco-end toward tail.
-            // CarGroup.Cars is ordered tail-to-loco, so loco-end is at the end.
-            var destGroups = GroupByDestination(cars, loco, skippedCars);
+            var destGroups = GroupByDestination(cars, loco, skippedCarIds);
             if (destGroups.Count < 2)
-                return null; // Can't split — all one group
+                return null;
 
             Log($"Found {destGroups.Count} destination groups");
 
-            // Walk from loco toward tail. For each group, check if it could be
-            // the TAIL of the kept consist (i.e., the first delivery after splitting).
             for (int keepCount = 1; keepCount < destGroups.Count; keepCount++)
             {
                 var tailGroup = destGroups[keepCount - 1];
@@ -73,7 +62,6 @@ namespace Autopilot.Planning
                 LogDebug($"Split at {keepCount} groups: kept={keptCars.Count}, dropped={droppedCars.Count}, " +
                     $"trainLen={shorterLength:F0}m, blockedSwitches={blockedSwitches.Count}");
 
-                // Only check the TAIL group — that's the first delivery after splitting.
                 var (found, steps) = _checker.CanRouteToWithSteps(
                     loco, destLoc, shorterLength,
                     shorterConsist);
@@ -96,9 +84,6 @@ namespace Autopilot.Planning
                     continue;
                 }
 
-                // Check approach direction — does the tail actually lead?
-                // The route check above only verifies the route exists and is
-                // safe, not that the train arrives tail-first.
                 var approachTarget = tailGroup.approachTarget;
                 if (!_checker.ApproachAnalyzer.CheckApproachDirection(loco, group, approachTarget))
                 {
@@ -116,23 +101,18 @@ namespace Autopilot.Planning
             return null;
         }
 
-        /// <summary>
-        /// Group cars by destination segment, ordered from loco-end to tail.
-        /// </summary>
         private List<(List<Car> cars, DirectedPosition destLocation, string destName, SpanBoundary approachTarget)> GroupByDestination(
-            IReadOnlyList<ICar> cars, BaseLocomotive loco, IEnumerable<Car>? skippedCars = null)
+            IReadOnlyList<ICar> cars, BaseLocomotive loco, IEnumerable<string>? skippedCarIds = null)
         {
             var groups = new List<(List<Car>, DirectedPosition, string, SpanBoundary)>();
 
-            // Iterate from loco-end (last index) toward tail (first index)
             int i = cars.Count - 1;
             while (i >= 0)
             {
                 var car = cars[i];
 
-                var gameCarCheck = (car as CarAdapter)?.Car;
                 if (car.IsLocoOrTender || car.Waybill == null
-                    || (skippedCars != null && gameCarCheck != null && skippedCars.Contains(gameCarCheck)))
+                    || (skippedCarIds != null && skippedCarIds.Contains(car.id)))
                 {
                     i--;
                     continue;
@@ -153,7 +133,7 @@ namespace Autopilot.Planning
                     }
                     else
                     {
-                        approachTarget = new SpanBoundary(destLoc.Segment, destLoc.DistanceFromA, destLoc.Facing);
+                        approachTarget = new SpanBoundary(destLoc.Segment?.id, destLoc.DistanceFromA, destLoc.Facing);
                     }
                 }
                 catch
@@ -168,8 +148,8 @@ namespace Autopilot.Planning
                     continue;
                 }
 
-                // Group consecutive cars (toward tail) with the same destination segment
-                var group = new List<Car> { (car as CarAdapter)?.Car };
+                var gameCar = (car as CarAdapter)?.Car;
+                var carGroup = new List<Car> { gameCar };
                 while (i - 1 >= 0)
                 {
                     var nextCar = cars[i - 1];
@@ -184,26 +164,22 @@ namespace Autopilot.Planning
                     catch { break; }
                     if (nextDestLoc.Segment == null || nextDestLoc.Segment != destLoc.Segment)
                         break;
-                    group.Add((nextCar as CarAdapter)?.Car);
+                    carGroup.Add((nextCar as CarAdapter)?.Car);
                     i--;
                 }
 
-                groups.Add((group, destLoc, destName, approachTarget));
+                groups.Add((carGroup, destLoc, destName, approachTarget));
                 i--;
             }
 
             return groups;
         }
 
-        /// <summary>
-        /// Compute the set of switches blocked by the dropped cars.
-        /// </summary>
         private HashSet<string> ComputeBlockedSwitches(
             List<Car> droppedCars, List<Car> keptCars, BaseLocomotive loco, CarGroup group)
         {
             var graph = Graph.Shared;
 
-            // Step 1: Segments occupied by dropped cars
             var droppedSegIds = new HashSet<string>();
             foreach (var car in droppedCars)
             {
@@ -211,7 +187,6 @@ namespace Autopilot.Planning
                 if (car.LocationB.segment != null) droppedSegIds.Add(car.LocationB.segment.id);
             }
 
-            // Step 2: Segments occupied by kept cars + loco (these switches must NOT be blocked)
             var keptSegIds = new HashSet<string>();
             if (loco.LocationF.segment != null) keptSegIds.Add(loco.LocationF.segment.id);
             if (loco.LocationR.segment != null) keptSegIds.Add(loco.LocationR.segment.id);
@@ -221,7 +196,6 @@ namespace Autopilot.Planning
                 if (car.LocationB.segment != null) keptSegIds.Add(car.LocationB.segment.id);
             }
 
-            // Step 3: Find all switches on dropped car segments
             var candidateSwitches = new HashSet<string>();
             foreach (var car in droppedCars)
             {
@@ -237,7 +211,6 @@ namespace Autopilot.Planning
                 }
             }
 
-            // Step 4: Remove switches that are ALSO on kept car / loco segments.
             var blocked = new HashSet<string>();
             foreach (var switchId in candidateSwitches)
             {
@@ -245,30 +218,47 @@ namespace Autopilot.Planning
                     blocked.Add(switchId);
             }
 
-            // Step 5: Find the first switch BEYOND the dropped cars (tail direction)
             var tailCar = group.TailCar;
             if (tailCar != null && group.TailOutwardEnd.HasValue && group.TailInwardEnd.HasValue)
             {
                 var tailOutward = group.TailOutwardEnd.Value;
                 var tailInward = group.TailInwardEnd.Value;
-                if (tailOutward.Segment != null)
+
+                // Resolve GraphPosition to game segment for the walk
+                TrackSegment? outwardSeg = null;
+                TrackSegment? inwardSeg = null;
+                if (tailOutward.SegmentId != null)
                 {
-                    // Determine outward direction from canonical position
+                    foreach (var seg in graph.Segments)
+                    {
+                        if (seg.id == tailOutward.SegmentId) { outwardSeg = seg; break; }
+                    }
+                }
+                if (tailInward.SegmentId != null)
+                {
+                    foreach (var seg in graph.Segments)
+                    {
+                        if (seg.id == tailInward.SegmentId) { inwardSeg = seg; break; }
+                    }
+                }
+
+                if (outwardSeg != null)
+                {
                     TrackSegment.End walkEnd;
-                    if (tailOutward.Segment == tailInward.Segment)
+                    if (outwardSeg == inwardSeg)
                     {
                         walkEnd = tailOutward.DistanceFromA < tailInward.DistanceFromA
                             ? TrackSegment.End.A : TrackSegment.End.B;
                     }
                     else
                     {
-                        var cn = Services.TrackWalker.FindSharedNode(tailOutward.Segment, tailInward.Segment);
-                        var ce = cn != null ? tailOutward.Segment.EndForNode(cn) : TrackSegment.End.A;
+                        var cn = inwardSeg != null ? Services.TrackWalker.FindSharedNode(outwardSeg, inwardSeg) : null;
+                        var ce = cn != null ? outwardSeg.EndForNode(cn) : TrackSegment.End.A;
                         walkEnd = ce == TrackSegment.End.A ? TrackSegment.End.B : TrackSegment.End.A;
                     }
 
                     var result = Services.TrackWalker.WalkToSwitch(
-                        tailOutward.Segment, walkEnd, maxSegments: 10);
+                        outwardSeg, walkEnd, maxSegments: 10);
                     if (result.HasValue && !blocked.Contains(result.Value.switchNode.id))
                     {
                         blocked.Add(result.Value.switchNode.id);
@@ -281,9 +271,6 @@ namespace Autopilot.Planning
             return blocked;
         }
 
-        /// <summary>
-        /// Check if a route is safe — no route steps pass through blocked switches.
-        /// </summary>
         public static bool IsRouteSafe(List<RouteSearch.Step> routeSteps, HashSet<string> blockedSwitches)
         {
             foreach (var step in routeSteps)
@@ -316,32 +303,33 @@ namespace Autopilot.Planning
                 || IsSwitchOnSegment(switchId, loco.LocationR);
         }
 
-        /// <summary>
-        /// Build a SplitInfo from the kept/dropped car lists.
-        /// </summary>
         private SplitInfo BuildSplitInfo(BaseLocomotive loco, List<Car> keptCars,
             List<Car> droppedCars, CarGroup group, Graph graph)
         {
-            // Split car is the last kept car (closest to the dropped cars)
             var splitCar = keptCars[keptCars.Count - 1];
-
-            // Split end faces the dropped cars
             var firstDropped = droppedCars[0];
             var splitEnd = splitCar.CoupledTo(Car.LogicalEnd.A) == firstDropped
                 ? Car.LogicalEnd.A : Car.LogicalEnd.B;
-
-            // Couple target is the first dropped car
             var coupleTarget = firstDropped;
 
-            // Couple location: free (uncoupled) end of the couple target.
-            // Don't use ClosestLogicalEndTo (crow-flies).
             var freeEnd = coupleTarget.CoupledTo(Car.LogicalEnd.A) != null
                 ? Car.LogicalEnd.B : Car.LogicalEnd.A;
             var coupleWaypoint = CoupleLocationCalculator.GetCoupleLocationForEnd(
                 new CarAdapter(coupleTarget), freeEnd, graph);
 
-            return new SplitInfo(splitCar, splitEnd, droppedCars,
-                coupleWaypoint.ToDirectedPosition(), coupleTarget, coupleWaypoint);
+            // Convert to abstract types
+            var dropGp = new GraphPosition(coupleWaypoint.Segment?.id,
+                coupleWaypoint.DistanceFromA, coupleWaypoint.Facing);
+            var graphCoupleWp = new GraphCoupleWaypoint(
+                coupleWaypoint.Segment?.id, coupleWaypoint.DistanceFromA, coupleWaypoint.Facing);
+
+            // Wrap game Cars as ICars
+            ICar splitCarICar = new CarAdapter(splitCar);
+            ICar coupleTargetICar = new CarAdapter(coupleTarget);
+            IReadOnlyList<ICar> droppedICars = droppedCars.Select(c => (ICar)new CarAdapter(c)).ToList();
+
+            return new SplitInfo(splitCarICar, splitEnd, droppedICars,
+                dropGp, coupleTargetICar, graphCoupleWp);
         }
     }
 }

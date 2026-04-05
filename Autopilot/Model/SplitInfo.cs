@@ -10,26 +10,26 @@ namespace Autopilot.Model
     public class SplitInfo
     {
         /// <summary>Last kept car — uncouple after this car's tail end.</summary>
-        public Car SplitCar { get; }
+        public ICar SplitCar { get; }
 
         /// <summary>Which end of SplitCar faces the dropped cars.</summary>
         public Car.LogicalEnd SplitEnd { get; }
 
         /// <summary>Cars being dropped (need handbrakes, will be recoupled later).</summary>
-        public List<Car> DroppedCars { get; }
+        public IReadOnlyList<ICar> DroppedCars { get; }
 
         /// <summary>Location to return to for recoupling (first dropped car's position).</summary>
-        public DirectedPosition DropLocation { get; }
+        public GraphPosition DropLocation { get; }
 
         /// <summary>First dropped car — the loco couples back to this.</summary>
-        public Car CoupleTarget { get; }
+        public ICar CoupleTarget { get; }
 
         /// <summary>Location for SetWaypointWithCouple (0.5m past couple target).</summary>
-        public CoupleWaypoint CoupleLocation { get; }
+        public GraphCoupleWaypoint CoupleLocation { get; }
 
-        public SplitInfo(Car splitCar, Car.LogicalEnd splitEnd,
-            List<Car> droppedCars, DirectedPosition dropLocation,
-            Car coupleTarget, CoupleWaypoint coupleLocation)
+        public SplitInfo(ICar splitCar, Car.LogicalEnd splitEnd,
+            IReadOnlyList<ICar> droppedCars, GraphPosition dropLocation,
+            ICar coupleTarget, GraphCoupleWaypoint coupleLocation)
         {
             SplitCar = splitCar;
             SplitEnd = splitEnd;

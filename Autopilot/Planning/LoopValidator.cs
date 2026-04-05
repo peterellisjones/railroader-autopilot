@@ -485,7 +485,17 @@ namespace Autopilot.Planning
                             bool anyDestReachable = false;
                             foreach (var dest in deliveryDestinations)
                             {
-                                var destLoc = dest.ToLocation();
+                                // Convert SpanBoundary (string SegmentId) to Location
+                                TrackSegment destSeg = null;
+                                if (dest.SegmentId != null)
+                                {
+                                    foreach (var s in Graph.Shared.Segments)
+                                    {
+                                        if (s.id == dest.SegmentId) { destSeg = s; break; }
+                                    }
+                                }
+                                var destDp = new DirectedPosition(destSeg, dest.DistanceFromA, dest.Facing);
+                                var destLoc = destDp.ToLocation();
                                 if (wpLoc.segment == null || destLoc.segment == null)
                                     continue;
 
@@ -515,7 +525,7 @@ namespace Autopilot.Planning
                                 int destReversals = ReversalCounter.FromSteps(bestSteps);
                                 int otherReversals = ReversalCounter.FromSteps(useA ? stepsB : stepsA);
 
-                                _logger.Log("LoopValidator", $"GetRepositionLocation: wp→{dest.Segment?.id} " +
+                                _logger.Log("LoopValidator", $"GetRepositionLocation: wp→{dest.SegmentId} " +
                                     $"shorter={destReversals} reversal(s), other={otherReversals} reversal(s), " +
                                     $"distA={(foundA ? metricsA.Distance : float.MaxValue):F0}, distB={(foundB ? metricsB.Distance : float.MaxValue):F0}");
 

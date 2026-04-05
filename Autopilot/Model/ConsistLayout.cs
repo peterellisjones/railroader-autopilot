@@ -8,12 +8,12 @@ namespace Autopilot.Model
 {
     public class ConsistLayout
     {
-        public BaseLocomotive Loco { get; }
+        public BaseLocomotive? Loco { get; }
         public CarGroup SideA { get; }
         public CarGroup SideB { get; }
         public bool HasWaybilledCars { get; }
 
-        private ConsistLayout(BaseLocomotive loco, CarGroup sideA, CarGroup sideB, bool hasWaybilledCars)
+        private ConsistLayout(BaseLocomotive? loco, CarGroup sideA, CarGroup sideB, bool hasWaybilledCars)
         {
             Loco = loco;
             SideA = sideA;
