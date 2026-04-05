@@ -80,6 +80,8 @@ namespace Autopilot.Planning
                 }
 
                 // Find existing cars on this span and compute occupied space.
+                // Use TrackSpan.Contains to check actual span boundaries, not just
+                // segment membership — a segment can extend beyond the span.
                 var carsOnSpan = new List<Car>();
                 bool hasPendingWaybill = false;
                 float occupiedLength = 0f;
@@ -88,10 +90,7 @@ namespace Autopilot.Planning
                 {
                     if (coupled.Contains(car)) continue;
 
-                    var segA = car.LocationA.segment?.id;
-                    var segB = car.LocationB.segment?.id;
-                    if ((segA == null || !spanSegIds.Contains(segA)) &&
-                        (segB == null || !spanSegIds.Contains(segB)))
+                    if (!span.Contains(car.LocationA) && !span.Contains(car.LocationB))
                         continue;
 
                     occupiedLength += car.carLength;
