@@ -203,9 +203,9 @@ namespace Autopilot.UI
 
         private string BuildFilterSummary(PickupFilter filter, int carCount)
         {
-            // "Picking up 5 car(s) within 2.1 mi on the switchlist going to Bryson, Andrews"
+            // "Found 5 car(s) within 2.1 mi on the switchlist going to Bryson, Andrews"
             var parts = new List<string>();
-            parts.Add($"Picking up {carCount} car(s)");
+            parts.Add($"Found {carCount} car(s)");
 
             // Distance
             if (filter.MaxDistance < float.MaxValue)
@@ -271,6 +271,8 @@ namespace Autopilot.UI
             // Game units are meters; display in feet/miles. 1 meter ≈ 3.281 feet.
             float sliderMaxMeters = 72000f; // ~45 miles
             var filterRef = filter; // capture for lambdas
+            builder.AddLabel("<b>Distance</b>")
+                .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
             builder.AddSlider(
                 () => filterRef.MaxDistance >= sliderMaxMeters ? sliderMaxMeters : filterRef.MaxDistance,
                 () =>
@@ -279,7 +281,7 @@ namespace Autopilot.UI
                     float feet = filterRef.MaxDistance * 3.281f;
                     return feet >= 5280f ? $"{(feet / 5280f):F1} mi" : $"{feet:F0} ft";
                 },
-                (val) => { filterRef.MaxDistance = val >= sliderMaxMeters ? float.MaxValue : val; },
+                (val) => { filterRef.MaxDistance = val >= sliderMaxMeters ? float.MaxValue : val; RebuildPanel(); },
                 0f, sliderMaxMeters);
 
             // From/To columns side by side
@@ -290,7 +292,6 @@ namespace Autopilot.UI
                 // FROM column
                 hstack.VStack(fromCol =>
                 {
-                    fromCol.FieldLabelWidth = 140f;
                     fromCol.AddLabel("<b>From</b>")
                         .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     int fromIdx = (int)filter.From.Mode;
@@ -306,17 +307,22 @@ namespace Autopilot.UI
                         foreach (var option in _fromOptions)
                         {
                             var opt = option;
-                            fromCol.AddField(opt, fromCol.AddToggle(
-                                () => filter.From.CheckedItems.Contains(opt),
-                                (val) =>
-                                {
-                                    if (val)
-                                        filter.From.CheckedItems.Add(opt);
-                                    else
-                                        filter.From.CheckedItems.Remove(opt);
-                                    RefreshPickupOptions(loco2);
-                                    RebuildPanel();
-                                }));
+                            fromCol.HStack(row =>
+                            {
+                                row.AddToggle(
+                                    () => filter.From.CheckedItems.Contains(opt),
+                                    (val) =>
+                                    {
+                                        if (val)
+                                            filter.From.CheckedItems.Add(opt);
+                                        else
+                                            filter.From.CheckedItems.Remove(opt);
+                                        RefreshPickupOptions(loco2);
+                                        RebuildPanel();
+                                    });
+                                row.AddLabel(opt)
+                                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+                            }, 8f);
                         }
                         if (_fromOptions.Count == 0)
                             fromCol.AddLabel("<color=yellow>No options</color>")
@@ -327,7 +333,6 @@ namespace Autopilot.UI
                 // TO column
                 hstack.VStack(toCol =>
                 {
-                    toCol.FieldLabelWidth = 140f;
                     toCol.AddLabel("<b>To</b>")
                         .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
                     int toIdx = (int)filter.To.Mode;
@@ -343,17 +348,22 @@ namespace Autopilot.UI
                         foreach (var option in _toOptions)
                         {
                             var opt = option;
-                            toCol.AddField(opt, toCol.AddToggle(
-                                () => filter.To.CheckedItems.Contains(opt),
-                                (val) =>
-                                {
-                                    if (val)
-                                        filter.To.CheckedItems.Add(opt);
-                                    else
-                                        filter.To.CheckedItems.Remove(opt);
-                                    RefreshPickupOptions(loco2);
-                                    RebuildPanel();
-                                }));
+                            toCol.HStack(row =>
+                            {
+                                row.AddToggle(
+                                    () => filter.To.CheckedItems.Contains(opt),
+                                    (val) =>
+                                    {
+                                        if (val)
+                                            filter.To.CheckedItems.Add(opt);
+                                        else
+                                            filter.To.CheckedItems.Remove(opt);
+                                        RefreshPickupOptions(loco2);
+                                        RebuildPanel();
+                                    });
+                                row.AddLabel(opt)
+                                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+                            }, 8f);
                         }
                         if (_toOptions.Count == 0)
                             toCol.AddLabel("<color=yellow>No options</color>")
@@ -362,17 +372,7 @@ namespace Autopilot.UI
                 });
             });
 
-            // Options row
-            builder.HStack(row =>
-            {
-                row.AddField("Auto-add to switchlist", row.AddToggle(
-                    () => filter.AutoAddToSwitchlist,
-                    (val) => filter.AutoAddToSwitchlist = val));
-                if (getDeliverAfter != null && setDeliverAfter != null)
-                {
-                    row.AddField("Deliver after pickup", row.AddToggle(getDeliverAfter, setDeliverAfter));
-                }
-            });
+            builder.AddSection("");
 
             // Summary
             RefreshPickupOptions(loco);
@@ -383,6 +383,22 @@ namespace Autopilot.UI
             else
                 builder.AddLabel(summary)
                     .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+
+            // Options row
+            builder.HStack(row =>
+            {
+                row.AddToggle(
+                    () => filter.AutoAddToSwitchlist,
+                    (val) => filter.AutoAddToSwitchlist = val);
+                row.AddLabel("Auto-add to switchlist")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+                if (getDeliverAfter != null && setDeliverAfter != null)
+                {
+                    row.AddToggle(getDeliverAfter, setDeliverAfter);
+                    row.AddLabel("Deliver after pickup")
+                        .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+                }
+            }, 8f);
         }
 
         private void CreateWindow()
@@ -472,7 +488,7 @@ namespace Autopilot.UI
 
             outerBuilder.VScrollView(builder =>
             {
-            builder.Spacing = 1f;
+            builder.Spacing = 4f;
 
             var loco = TrainController.Shared?.SelectedLocomotive;
             _lastLocoId = loco?.id;
@@ -517,6 +533,8 @@ namespace Autopilot.UI
                         });
                 });
 
+                builder.AddSection("");
+
                 if (_selectedMode == AutopilotMode.Pickup)
                 {
                     BuildPickupFilterUI(builder, loco, _pickupFilter,
@@ -535,40 +553,31 @@ namespace Autopilot.UI
                     () => sm.DeliverAfterPickup, (val) => sm.DeliverAfterPickup = val);
             }
 
-            // Control buttons
             bool autopilotRunning = sm != null && sm.Phase is not (Idle or Completed or Failed);
 
+            var parkWpString = TrainSvc.GetCurrentWaypointLocationString(loco);
+            bool parkHasWaypoint = parkWpString != null;
+            bool hasParkingSpace = TrainSvc.GetParkingSpace(loco) != null;
+
+            builder.HStack(row =>
+            {
+                row.AddToggle(
+                    () => TrainSvc.GetAutoRefuelEnabled(loco),
+                    (val) => TrainSvc.SetAutoRefuelEnabled(loco, val));
+                row.AddLabel("Refuel when low")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+
+                row.AddToggle(
+                    () => TrainSvc.GetParkAfterDelivery(loco),
+                    (val) => TrainSvc.SetParkAfterDelivery(loco, val),
+                    hasParkingSpace);
+                row.AddLabel(hasParkingSpace ? "Park after delivery" : "<color=#888>Park after delivery</color>")
+                    .HorizontalTextAlignment(HorizontalAlignmentOptions.Left);
+            }, 8f);
+
+            // Jump to WP + Refuel + Parking buttons
             builder.ButtonStrip(strip =>
             {
-                if (sm == null || sm.Phase is Idle or Completed)
-                {
-                    if (_selectedMode == AutopilotMode.Pickup)
-                    {
-                        if (_eligibleCarCount > 0)
-                        {
-                            strip.AddButton("Start Pickup", () =>
-                            {
-                                controller.StartPickup(_pickupFilter, _deliverAfterPickup);
-                                RebuildPanel();
-                            });
-                        }
-                    }
-                    else
-                    {
-                        strip.AddButton("Start", () => { controller.StartAutopilot(); RebuildPanel(); });
-                    }
-                }
-                else if (sm.Phase is Failed)
-                {
-                    strip.AddButton("Retry", () => { controller.RetryAutopilot(); RebuildPanel(); });
-                    strip.AddButton("Abort", () => { controller.StopAutopilot(); RebuildPanel(); });
-                }
-                else
-                {
-                    strip.AddButton("Stop", () => { controller.StopAutopilot(); RebuildPanel(); });
-                }
-
-                // Jump to the AE's actual live waypoint, not the mod's internal target
                 var wpString = TrainSvc.GetCurrentWaypointLocationString(loco);
                 bool hasActiveWaypoint = wpString != null;
                 strip.AddButton("Jump to WP", () =>
@@ -583,11 +592,7 @@ namespace Autopilot.UI
                             CameraSelector.CameraIdentifier.Strategy);
                     }
                 }).Disable(!hasActiveWaypoint);
-            });
 
-            // Refuel controls on their own row
-            builder.ButtonStrip(strip =>
-            {
                 strip.AddButton("Refuel Now", () =>
                 {
                     var controller = AutopilotController.Instance;
@@ -596,33 +601,17 @@ namespace Autopilot.UI
                         var currentSm = controller.GetStateMachineForSelected();
                         if (currentSm != null && currentSm.Phase is not (Idle or Completed or Failed))
                         {
-                            // Autopilot is running — request refuel on next planning tick
                             currentSm.RequestRefuel();
                         }
                         else
                         {
-                            // Autopilot is idle — start a refuel-only run
                             controller.StartRefuel();
                         }
                         RebuildPanel();
                     }
                 }).Disable(sm != null && sm.Phase is Executing e && e.CurrentAction is RefuelAction)
                   .Tooltip("Refuel Now", "Route to the nearest fuel facility and refuel immediately");
-            });
 
-            builder.AddFieldToggle("Refuel when low",
-                () => TrainSvc.GetAutoRefuelEnabled(loco),
-                (val) => TrainSvc.SetAutoRefuelEnabled(loco, val))
-                .Tooltip("Auto-Refuel",
-                    "Automatically refuel when fuel/water drops below threshold (configure in mod settings)");
-
-            // Parking buttons on their own row
-            var parkWpString = TrainSvc.GetCurrentWaypointLocationString(loco);
-            bool parkHasWaypoint = parkWpString != null;
-            bool hasParkingSpace = TrainSvc.GetParkingSpace(loco) != null;
-
-            builder.ButtonStrip(strip =>
-            {
                 bool canSetPark = parkHasWaypoint && !autopilotRunning;
                 strip.AddButton("Set Park", () =>
                 {
@@ -650,14 +639,38 @@ namespace Autopilot.UI
                       : "Send this loco to its saved parking space");
             });
 
-            // "Park after delivery" checkbox
-            if (TrainSvc.GetParkingSpace(loco) != null)
+            builder.AddSection("");
+
+            // Start / Stop / Retry buttons — prominent, at the bottom of controls
+            if (sm == null || sm.Phase is Idle or Completed)
             {
-                builder.AddFieldToggle("Park after delivery",
-                    () => TrainSvc.GetParkAfterDelivery(loco),
-                    (val) => TrainSvc.SetParkAfterDelivery(loco, val))
-                    .Tooltip("Park After Delivery",
-                        "Automatically send this loco to its parking space when deliveries are complete");
+                if (_selectedMode == AutopilotMode.Pickup)
+                {
+                    if (_eligibleCarCount > 0)
+                    {
+                        builder.AddButtonMedium("Start Pickup", () =>
+                        {
+                            controller.StartPickup(_pickupFilter, _deliverAfterPickup);
+                            RebuildPanel();
+                        });
+                    }
+                }
+                else
+                {
+                    builder.AddButtonMedium("Start Delivery", () => { controller.StartAutopilot(); RebuildPanel(); });
+                }
+            }
+            else if (sm.Phase is Failed)
+            {
+                builder.ButtonStrip(strip =>
+                {
+                    strip.AddButton("Retry", () => { controller.RetryAutopilot(); RebuildPanel(); });
+                    strip.AddButton("Abort", () => { controller.StopAutopilot(); RebuildPanel(); });
+                });
+            }
+            else
+            {
+                builder.AddButton("Stop", () => { controller.StopAutopilot(); RebuildPanel(); });
             }
 
             if (sm == null)
